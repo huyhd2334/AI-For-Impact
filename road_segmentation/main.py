@@ -41,7 +41,7 @@ def resolve_source(source_str: str) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Road & Sidewalk Segmentation (Output Image + JSON)")
-    parser.add_argument("--source", type=str, default="day_1.mp4", help="Video/image source (path or filename in data_test)")
+    parser.add_argument("--source", "--image", dest="source", type=str, default="day_1.mp4", help="Video/image source (path or filename in data_test)")
     parser.add_argument("--model", type=str, default="mask2former", choices=["mask2former", "b2", "b0", "b1", "twinlite"], 
                         help="Model engine: mask2former (SOTA Hybrid), b2 (SegFormer-B2), b0 (Lightweight), twinlite (1.8MB)")
     parser.add_argument("--preview", action="store_true", help="Show live visual preview")
