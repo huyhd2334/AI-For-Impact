@@ -1,26 +1,25 @@
 import argparse
 import os
 from .analyzer import VideoTrafficAnalyzer
-from .generate_mock_video import generate_mock_traffic_video
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Traffic & Flood Camera Analyzer CLI")
-    parser.add_argument("--source", type=str, default=None, help="Đường dẫn file video mp4 hoặc RTSP stream URL")
-    parser.add_argument("--cam-id", type=str, default="CAM_BINHTHANH_01", help="Mã định danh camera")
-    parser.add_argument("--interval", type=float, default=5.0, help="Chu kỳ lưu dữ liệu JSON và ảnh snapshot (giây, mặc định 5.0s)")
-    parser.add_argument("--preview", action="store_true", help="Hiển thị cửa sổ xem trực tiếp có vẽ Bounding Box")
-    parser.add_argument("--fps", type=float, default=10.0, help="Tốc độ khung hình xử lý/hiển thị (chạy fps thấp: 5-10 fps để quan sát và không lag)")
+    parser = argparse.ArgumentParser(description="Traffic Surveillance & Counter CLI")
+    parser.add_argument("--source", type=str, default=None, help="Path to video file (.mp4) or image (.jpg) or RTSP stream URL")
+    parser.add_argument("--cam-id", type=str, default="CAM_BINHTHANH_01", help="Camera identifier")
+    parser.add_argument("--interval", type=float, default=5.0, help="Snapshot and event emission interval in seconds (default: 5.0s)")
+    parser.add_argument("--preview", action="store_true", help="Display visual live preview window")
+    parser.add_argument("--fps", type=float, default=10.0, help="Target processing/display FPS (default: 10.0)")
     default_model = "vn_traffic_surveillance.pt" if os.path.exists("vn_traffic_surveillance.pt") else ("rtdetr-x.pt" if os.path.exists("rtdetr-x.pt") else "yolov8s.pt")
-    parser.add_argument("--model", type=str, default=default_model, help=f"Mô hình AI nhận diện (mặc định: {default_model})")
-    parser.add_argument("--conf", type=float, default=0.18, help="Ngưỡng tin cậy (Confidence threshold, mặc định 0.18)")
-    parser.add_argument("--imgsz", type=int, default=1280, help="Kích thước ảnh inference (1280 giúp bắt xe nhỏ ở xa góc CCTV)")
-    parser.add_argument("--water-thresh", type=float, default=0.05, help="Ngưỡng diện tích để phát hiện mặt đường có nước (mặc định 0.05 = 5%%)")
-    parser.add_argument("--jam-speed", type=float, default=15.0, help="Vận tốc trung bình dưới ngưỡng này (km/h) mới báo ùn tắc (mặc định 15.0)")
-    parser.add_argument("--sahi", action="store_true", help="Kích hoạt chế độ SAHI Slicing (chia nhỏ ảnh 4K để bắt trọn xe nhỏ ở xa)")
-    parser.add_argument("--heatmap", action="store_true", help="VIP 3: Bật bản đồ nhiệt mật độ giao thông (Traffic Density Heatmap)")
-    parser.add_argument("--tripwire-y", type=float, default=0.58, help="VIP 1: Tỉ lệ vị trí vạch ảo đếm xe (mặc định 0.58 = 58%% chiều cao khung hình)")
-    parser.add_argument("--mock", action="store_true", help="Tự động tạo video giả lập để chạy thử")
+    parser.add_argument("--model", type=str, default=default_model, help=f"Detection AI model weight path (default: {default_model})")
+    parser.add_argument("--conf", type=float, default=0.18, help="Detection confidence threshold (default: 0.18)")
+    parser.add_argument("--imgsz", type=int, default=1280, help="Inference image resolution (default: 1280 for distant vehicles)")
+    parser.add_argument("--water-thresh", type=float, default=0.05, help="Area ratio threshold to trigger water presence (default: 0.05 = 5%%)")
+    parser.add_argument("--jam-speed", type=float, default=15.0, help="Average speed threshold (km/h) below which traffic is congested (default: 15.0)")
+    parser.add_argument("--sahi", action="store_true", help="Enable SAHI slicing for ultra-dense / 4K small vehicles")
+    parser.add_argument("--heatmap", action="store_true", help="Enable traffic density accumulation heatmap")
+    parser.add_argument("--tripwire-y", type=float, default=0.58, help="Virtual tripwire vertical position ratio (default: 0.58 = 58%% of frame height)")
+    parser.add_argument("--mock", action="store_true", help="Generate and run on synthetic traffic video")
 
     args = parser.parse_args()
 
@@ -33,7 +32,7 @@ def main():
     if args.mock or not video_source:
         mock_file = "mock_traffic_flood.mp4"
         if not os.path.exists(mock_file):
-            print("[Main] No input video found. Generating mock video...")
+            print("[Main] No input video found. Generating synthetic mock video...")
             generate_mock_traffic_video(mock_file)
         video_source = mock_file
 

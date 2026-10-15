@@ -14,13 +14,6 @@ except ImportError:
 
 
 class RoadSegmenter:
-    """
-    Hệ thống phân đoạn mặt đường & vỉa hè thông minh đa chế độ:
-    1. Chế độ Dynamic: Inference từng frame (TwinLiteNet 1.8MB, SegFormer-B0 14MB, SegFormer-B2 108MB).
-    2. Chế độ SOTA Calibrated: Dùng Mask2Former (Meta AI - 68.7M) chạy 1 lần hiệu chuẩn mặt đường hoàn hảo,
-       sau đó stream video thời gian thực 60-100+ FPS (0% tải GPU cho segmentation).
-    """
-
     SUPPORTED_MODELS = {
         "twinlite": "weights/best.pth",
         "b0": "nvidia/segformer-b0-finetuned-cityscapes-512-1024",
@@ -43,17 +36,14 @@ class RoadSegmenter:
         self.enable_corridor_fusion = enable_corridor_fusion
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Thư mục lưu trữ mask và ROI đã hiệu chuẩn
         curr_dir = Path(__file__).resolve().parent
         self.cache_dir = Path(cache_dir) if cache_dir else curr_dir / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Bộ nhớ đệm cho hiệu chuẩn tĩnh (Calibrated Mask)
         self.calibrated_road_mask: Optional[np.ndarray] = None
         self.calibrated_sidewalk_mask: Optional[np.ndarray] = None
         self.calibrated_polygons: List[List[List[int]]] = []
 
-        # Bộ đệm EMA để làm mượt thời gian
         self.smooth_road_mask: Optional[np.ndarray] = None
         self.smooth_sidewalk_mask: Optional[np.ndarray] = None
 
@@ -78,7 +68,7 @@ class RoadSegmenter:
         self.model.load_state_dict(clean_state)
         self.model.to(self.device).eval()
         self.engine = "twinlite"
-        print(f"[RoadSegmenter] Loaded TwinLiteNet (1.8 MB) on {self.device}")
+        print(f"[RoadSegmenter] Loaded TwinLiteNet on {self.device}")
 
     def _init_segformer(self):
         from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
@@ -87,23 +77,18 @@ class RoadSegmenter:
         self.processor = SegformerImageProcessor.from_pretrained(hf_id)
         self.model = SegformerForSemanticSegmentation.from_pretrained(hf_id).to(self.device).eval()
         self.engine = "segformer"
-        print(f"[RoadSegmenter] SegFormer Ready ({self.model_type.upper()})!")
+        print(f"[RoadSegmenter] SegFormer Ready ({self.model_type.upper()})")
 
     def _init_mask2former(self):
         from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
         hf_id = self.SUPPORTED_MODELS["mask2former"]
-        print(f"[RoadSegmenter] Loading SOTA Meta Mask2Former ({hf_id}) on {self.device}...")
+        print(f"[RoadSegmenter] Loading Meta Mask2Former ({hf_id}) on {self.device}...")
         self.processor = AutoImageProcessor.from_pretrained(hf_id)
         self.model = Mask2FormerForUniversalSegmentation.from_pretrained(hf_id).to(self.device).eval()
         self.engine = "mask2former"
-        print(f"[RoadSegmenter] Meta Mask2Former Ready (68.7M Params)!")
+        print("[RoadSegmenter] Meta Mask2Former Ready (68.7M Parameters)")
 
     def calibrate(self, reference_frame: np.ndarray, source_id: str = "camera", force: bool = False):
-        """
-        Chạy hiệu chuẩn tự động (Calibration) bằng Mask2Former:
-        - Kiểm tra file cache trước, nếu có sẵn nạp ngay lập tức (0ms).
-        - Nếu chưa có, chạy Mask2Former trích xuất mặt đường hoàn hảo và lưu cache.
-        """
         mask_file = self.cache_dir / f"{source_id}_road_mask.png"
         side_file = self.cache_dir / f"{source_id}_sidewalk_mask.png"
         roi_file = self.cache_dir / f"{source_id}_road_roi.json"
@@ -111,7 +96,7 @@ class RoadSegmenter:
         orig_h, orig_w = reference_frame.shape[:2]
 
         if not force and mask_file.exists() and roi_file.exists():
-            print(f"[RoadSegmenter] Found existing Calibration Cache for '{source_id}'. Loading...")
+            print(f"[RoadSegmenter] Found existing calibration cache for '{source_id}'. Loading...")
             self.calibrated_road_mask = cv2.imread(str(mask_file), cv2.IMREAD_GRAYSCALE)
             if self.calibrated_road_mask.shape != (orig_h, orig_w):
                 self.calibrated_road_mask = cv2.resize(self.calibrated_road_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
@@ -126,16 +111,15 @@ class RoadSegmenter:
             with open(roi_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 self.calibrated_polygons = data.get("road_polygons", [])
-            print(f"[RoadSegmenter] Loaded Cache successfully (0 ms overhead)!")
+            print("[RoadSegmenter] Calibration cache loaded successfully (0 ms overhead)")
             return
 
-        print(f"[RoadSegmenter] Running SOTA Mask2Former Calibration on {source_id}...")
+        print(f"[RoadSegmenter] Running Mask2Former Calibration on {source_id}...")
         road_mask, sidewalk_mask = self._infer_mask2former(reference_frame, orig_w, orig_h)
         self.calibrated_road_mask = road_mask
         self.calibrated_sidewalk_mask = sidewalk_mask
         self.calibrated_polygons = self.extract_road_polygons(road_mask)
 
-        # Lưu cache
         cv2.imwrite(str(mask_file), road_mask)
         cv2.imwrite(str(side_file), sidewalk_mask)
         with open(roi_file, "w", encoding="utf-8") as f:
@@ -144,7 +128,7 @@ class RoadSegmenter:
                 "image_size": [orig_w, orig_h],
                 "road_polygons": self.calibrated_polygons
             }, f, indent=2)
-        print(f"[RoadSegmenter] Calibration Completed & Saved to {self.cache_dir}!")
+        print(f"[RoadSegmenter] Calibration completed and saved to {self.cache_dir}")
 
     def segment(
         self,
@@ -154,11 +138,6 @@ class RoadSegmenter:
         draw_sidewalk: bool = True,
         use_calibration: bool = True
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-        """
-        Phân đoạn khung hình:
-        - Nếu use_calibration=True và đã có calibrated_mask: Chạy chế độ High-Speed Real-time (60-100+ FPS).
-        - Ngược lại: Inference động từng frame.
-        """
         orig_h, orig_w = frame.shape[:2]
 
         if use_calibration and self.calibrated_road_mask is not None:
@@ -177,7 +156,7 @@ class RoadSegmenter:
 
         road_ratio = float(np.sum(final_road > 0)) / float(orig_h * orig_w)
 
-        # Tô màu trực quan siêu tốc bằng GPU Tensor (Tối ưu cho ảnh 4K/2K)
+        # High-speed GPU tensor blending for 4K/2K resolution
         if self.device == "cuda":
             frame_t = torch.from_numpy(frame).cuda()
             if draw_road:
@@ -209,7 +188,6 @@ class RoadSegmenter:
         return annotated, final_road, final_sidewalk, road_ratio
 
     def _infer_mask2former(self, frame: np.ndarray, orig_w: int, orig_h: int) -> Tuple[np.ndarray, np.ndarray]:
-        # Resize nhẹ 1024 để inference Mask2Former nhanh và chuẩn
         infer_w = min(orig_w, 1024)
         infer_h = int(orig_h * (infer_w / float(orig_w)))
         resized = cv2.resize(frame, (infer_w, infer_h))

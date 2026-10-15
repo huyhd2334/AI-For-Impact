@@ -41,14 +41,14 @@ def resolve_source(source_str: str) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Road & Sidewalk Segmentation (Output Image + JSON)")
-    parser.add_argument("--source", "--image", dest="source", type=str, default="day_1.mp4", help="Video/image source (path or filename in data_test)")
+    parser.add_argument("--source", "--image", dest="source", type=str, default="day_1.mp4", help="Video or image input path")
     parser.add_argument("--model", type=str, default="mask2former", choices=["mask2former", "b2", "b0", "b1", "twinlite"], 
-                        help="Model engine: mask2former (SOTA Hybrid), b2 (SegFormer-B2), b0 (Lightweight), twinlite (1.8MB)")
-    parser.add_argument("--preview", action="store_true", help="Show live visual preview")
-    parser.add_argument("--out-dir", type=str, default=str(curr_dir / "outputs"), help="Output directory for Image and JSON")
+                        help="Model engine: mask2former (SOTA Hybrid), b2 (SegFormer-B2), b0 (Lightweight), twinlite (Realtime)")
+    parser.add_argument("--preview", action="store_true", help="Display live visual preview window")
+    parser.add_argument("--out-dir", type=str, default=str(curr_dir / "outputs"), help="Output directory for annotated image and JSON")
     parser.add_argument("--recalibrate", action="store_true", help="Force recalibrating road mask using Mask2Former")
-    parser.add_argument("--alpha", type=float, default=0.38, help="Mask overlay transparency (0.0 - 1.0)")
-    parser.add_argument("--fps", type=float, default=30.0, help="Target playback fps")
+    parser.add_argument("--alpha", type=float, default=0.38, help="Mask overlay transparency (0.0 to 1.0)")
+    parser.add_argument("--fps", type=float, default=30.0, help="Target playback FPS")
 
     args = parser.parse_args()
 
@@ -69,7 +69,7 @@ def main():
         enable_corridor_fusion=True
     )
 
-    # 1. Xử lý ảnh tĩnh
+    # 1. Image Mode
     if is_image:
         img = cv2.imread(str(video_path))
         t0 = time.time()
@@ -104,8 +104,8 @@ def main():
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         print(f"\n[RoadSegmenter] Successfully Processed!")
-        print(f" -> Image saved to: {out_img_path}")
-        print(f" -> JSON saved to:  {out_json_path}")
+        print(f" -> Output Image: {out_img_path}")
+        print(f" -> Output JSON:  {out_json_path}\n")
 
         if args.preview:
             cv2.imshow("Road Segmentation Preview", resize_maintain_aspect(annotated))
@@ -113,7 +113,7 @@ def main():
             cv2.destroyAllWindows()
         return
 
-    # 2. Xử lý Video (Chế độ Hybrid SOTA Real-Time)
+    # 2. Video Mode
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"[Error] Cannot open video: {video_path}")
@@ -185,7 +185,6 @@ def main():
         if args.preview:
             cv2.destroyAllWindows()
 
-        # Xuất ảnh snapshot cuối cùng + file JSON tổng kết
         if last_annotated is not None:
             out_img_path = out_dir / f"{source_id}_segmented.jpg"
             out_json_path = out_dir / f"{source_id}_segmentation.json"
@@ -211,9 +210,9 @@ def main():
             with open(out_json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            print(f"\n[RoadSegmenter] Done!")
+            print(f"\n[RoadSegmenter] Completed!")
             print(f" -> Output Image: {out_img_path}")
-            print(f" -> Output JSON:  {out_json_path}")
+            print(f" -> Output JSON:  {out_json_path}\n")
 
 
 if __name__ == "__main__":

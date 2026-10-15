@@ -1,17 +1,10 @@
 from typing import Dict, List, Tuple, Optional
+import math
 import cv2
 import numpy as np
 
 
 class VehicleDetector:
-    """
-    Module phụ trách đếm xe và đánh giá mật độ giao thông.
-    Hỗ trợ YOLO (ultralytics) nếu có cài đặt, tự động fallback sang Background Subtraction (OpenCV)
-    để code chạy ngay lập tức mà không bắt buộc phải download model nặng nếu máy chưa có.
-    """
-    
-    # COCO class IDs cho phương tiện giao thông
-    # 2: car, 3: motorcycle, 5: bus, 7: truck, 1: bicycle, 0: person (người lái xe)
     VEHICLE_CLASSES = {
         2: "car",
         3: "motorcycle",
@@ -37,18 +30,18 @@ class VehicleDetector:
         self.use_yolo = False
         self.use_sahi = use_sahi
         self.sahi_model = None
-        self.track_history = {}  # {track_id: (cx, cy, timestamp, speed_kmh)}
+        self.track_history = {}
         
-        # VIP 3: Traffic Density Heatmap
+        # Traffic Density Heatmap
         self.enable_heatmap = enable_heatmap
         self.heatmap_acc = None
         
-        # VIP 1: Virtual Tripwire / Counting Line
+        # Virtual Tripwire Counting Line
         self.tripwire_y_ratio = tripwire_y_ratio
         self.tripwire_total = 0
         self.tripwire_breakdown = {}
         self.crossing_timestamps = []
-        self.recent_crossings = []  # [(cx, cy, timestamp)]
+        self.recent_crossings = []
         self.tripwire_start_time = None
         self.flow_vpm = 0.0
 
@@ -59,7 +52,7 @@ class VehicleDetector:
             device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
             self.yolo_model = YOLO(model_name)
             self.use_yolo = True
-            print(f"[VehicleDetector] Model: {model_name} | Thiết bị: {device_name} (device={self.device}) | imgsz={self.imgsz} | conf={self.confidence_thresh}")
+            print(f"[VehicleDetector] Model: {model_name} | Device: {device_name} (device={self.device}) | imgsz={self.imgsz} | conf={self.confidence_thresh}")
 
             if self.use_sahi:
                 from sahi import AutoDetectionModel
@@ -69,14 +62,13 @@ class VehicleDetector:
                     confidence_threshold=confidence_thresh,
                     device=f"cuda:{self.device}" if self.device == 0 else "cpu"
                 )
-                print(f"[VehicleDetector] SAHI Slicing: BẬT (quét từng ô 768x768 bắt trọn xe nhỏ ở xa)")
+                print(f"[VehicleDetector] SAHI Slicing: ENABLED (768x768 tiles for small distant vehicles)")
         except Exception as e:
-            print(f"[VehicleDetector] Chưa thể load model ({e}). Sử dụng OpenCV Background Subtractor fallback.")
+            print(f"[VehicleDetector] Failed to load model ({e}). Using OpenCV Background Subtractor fallback.")
             self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=True)
 
     @staticmethod
     def _calc_iou_ios(boxA: Tuple[int, int, int, int], boxB: Tuple[int, int, int, int]) -> Tuple[float, float]:
-        """Tính chỉ số IoU (Intersection over Union) và IoS (Intersection over Smaller)"""
         xA = max(boxA[0], boxB[0])
         yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2])
@@ -94,11 +86,7 @@ class VehicleDetector:
         self, 
         frame: np.ndarray, 
         timestamp: Optional[float] = None
-    ) -> Tuple[int, Dict[str, int], np.ndarray, float]:
-        """
-        Đếm xe trong frame, theo dõi ID (Tracking), tính toán vận tốc tức thời và vận tốc trung bình dòng xe.
-        Trả về: (tổng_số_xe, chi_tiết_loại_xe, frame_đã_vẽ, vận_tốc_trung_bình_kmh)
-        """
+    ) -> Tuple[int, Dict[str, int], np.ndarray, float, Dict]:
         if timestamp is None:
             import time
             timestamp = time.time()
@@ -112,7 +100,7 @@ class VehicleDetector:
             raw_vehicles = []
             raw_persons = []
 
-            # 1. Chạy phát hiện vật thể: Dùng SAHI Slicing nếu bật, hoặc GPU direct inference
+            # 1. Object detection via SAHI Slicing or standard batch inference
             if self.use_sahi and self.sahi_model:
                 from sahi.predict import get_sliced_prediction
                 sahi_result = get_sliced_prediction(
@@ -170,21 +158,16 @@ class VehicleDetector:
                         elif "person" in raw_name:
                             raw_persons.append({"box": (x1, y1, x2, y2), "conf": conf})
 
-            # Sắp xếp theo confidence giảm dần
             raw_vehicles.sort(key=lambda x: x["conf"], reverse=True)
             raw_persons.sort(key=lambda x: x["conf"], reverse=True)
 
-            # BƯỚC 1: Xử lý người lái xe khi đến gần camera (Orphan Rider)
-            # Khi xe máy đến gần camera, mô hình COCO thường nhận diện người lái (person) với độ tin cậy rất cao (0.8-0.9)
-            # nhưng phần thân xe máy có thể bị khuất hoặc chạm mép dưới màn hình.
-            # Ta bổ sung các người lái đơn lẻ trên lòng đường vào danh sách xe máy để không bị miss khi tới gần.
+            # Associate orphan riders when camera view cuts off vehicle chassis
             img_h, img_w = frame.shape[:2]
             for p in raw_persons:
                 px1, py1, px2, py2 = p["box"]
                 p_conf = p["conf"]
-                pbw, pbh = (px2 - px1), (py2 - py1)
+                pbh = py2 - py1
                 
-                # Chỉ xét ở nửa dưới màn hình (khu vực xe tiến sát camera) và kích thước người đủ lớn
                 if py2 > int(img_h * 0.35) and pbh >= 160:
                     matched = False
                     for v in raw_vehicles:
@@ -195,13 +178,12 @@ class VehicleDetector:
                     if not matched:
                         raw_vehicles.append({"class": "motorcycle", "box": (px1, py1, px2, py2), "conf": p_conf})
 
-            # Sắp xếp lại theo conf giảm dần
             raw_vehicles.sort(key=lambda x: x["conf"], reverse=True)
 
-            # BƯỚC 2: Lọc bỏ box xe máy quá to bất thường & Lọc trùng lặp
+            # Remove oversize anomalies and duplicate detections
             clean_vehicles = []
-            max_allowed_w = int(img_w * 0.45) # ~970px trong khung 2160w
-            max_allowed_h = int(img_h * 0.38) # ~1450px trong khung 3840h
+            max_allowed_w = int(img_w * 0.45)
+            max_allowed_h = int(img_h * 0.38)
             max_allowed_area = int(img_w * img_h * 0.15)
 
             for v in raw_vehicles:
@@ -209,13 +191,9 @@ class VehicleDetector:
                 x1, y1, x2, y2 = v["box"]
                 bw, bh = (x2 - x1), (y2 - y1)
 
-                # Chỉ loại bỏ box nếu kích thước to phi lý (lỗi nhận diện gộp nửa màn hình)
                 if cname in ["motorcycle", "bicycle"]:
                     if bw > max_allowed_w or bh > max_allowed_h or (bw * bh) > max_allowed_area:
                         continue
-                    
-                    # Tỉ lệ ngang/dọc chỉ áp dụng khi xe KHÔNG chạm mép đáy màn hình
-                    # (khi xe chạm mép đáy, chiều cao bị cắt ngắn nên bw/bh tự nhiên tăng cao)
                     is_near_bottom_edge = (y2 >= img_h - 150)
                     if not is_near_bottom_edge and (bw / float(max(1, bh)) > 1.95):
                         continue
@@ -238,19 +216,16 @@ class VehicleDetector:
                 if not is_duplicate:
                     clean_vehicles.append(v)
 
-            # BƯỚC 3: Tracking tâm & LỌC BỎ XE KHÔNG DI CHUYỂN (Xe đỗ/dựng bên đường)
-            import math
+            # Centroid tracking and stationary parked vehicle filtering
             if not hasattr(self, 'next_track_id'):
                 self.next_track_id = 1
             if not hasattr(self, 'track_details'):
-                self.track_details = {} # {tid: {'start_pos', 'start_t', 'last_pos', 'prev_pos', 'last_t', 'hit_count', 'is_stationary', 'prev_spd', 'crossed_tripwire'}}
+                self.track_details = {}
 
-            # Tính độ dày nét vẽ và cỡ chữ tỉ lệ theo độ phân giải ảnh (rõ nét cả ở 4K và khi scale thu nhỏ)
             line_thick = max(2, int(img_h / 850))
             font_scale = max(0.45, img_h / 3200.0)
             font_thick = max(1, int(img_h / 1800))
 
-            # Tọa độ vạch ảo đếm xe (Virtual Tripwire) cắt ngang làn đường
             line_y = int(img_h * self.tripwire_y_ratio)
             line_x1 = int(img_w * 0.05)
             line_x2 = int(img_w * 0.95)
@@ -264,7 +239,6 @@ class VehicleDetector:
                 cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
                 bw, bh = (x2 - x1), (y2 - y1)
 
-                # Tìm ID tracker gần nhất: xe ở gần camera (y lớn) di chuyển nhanh trong pixel space
                 y_factor = max(1.0, cy / (float(img_h) * 0.55))
                 best_id = None
                 best_dist = max(140.0, float(bh) * 0.85) * y_factor
@@ -292,7 +266,7 @@ class VehicleDetector:
                     td['last_t'] = timestamp
                     td['hit_count'] += 1
 
-                    # NẾU XE KHÔNG DI CHUYỂN: Sau >= 3 frame mà vị trí dời đi < 16 pixels -> Xe đỗ/dựng im lìm
+                    # Flag stationary objects if movement < 16px over multiple frames
                     total_disp = math.hypot(cx - td['start_pos'][0], cy - td['start_pos'][1])
                     if td['hit_count'] >= 3 and (timestamp - td['start_t']) >= 0.25:
                         if total_disp < 16.0:
@@ -315,12 +289,12 @@ class VehicleDetector:
                     }
                     self.next_track_id += 1
 
-                # NẾU KHÔNG DI CHUYỂN: XÓA ĐI ĐỪNG TÍNH VÀ ĐỪNG VẼ!
+                # Discard stationary/parked vehicles from flow statistics
                 td_curr = self.track_details[tid_show]
                 if td_curr['is_stationary']:
                     continue
 
-                # VIP 1: KIỂM TRA XE CẮT QUA VẠCH ẢO (VIRTUAL TRIPWIRE)
+                # Check virtual tripwire crossing
                 prev_y = td_curr.get('prev_pos', (cx, cy))[1]
                 if (line_x1 <= cx <= line_x2) and (prev_y < line_y <= cy):
                     if not td_curr.get('crossed_tripwire', False):
@@ -340,36 +314,32 @@ class VehicleDetector:
 
                 active_render_vehicles.append((x1, y1, x2, y2, cname, tid_show, speed_kmh))
 
-            # TÍNH TOÁN LƯU LƯỢNG XE QUA VẠCH (VEHICLES PER MINUTE - VPM)
+            # Compute flow rate (Vehicles Per Minute - VPM)
             if self.tripwire_start_time is None:
                 self.tripwire_start_time = timestamp
             self.crossing_timestamps = [t for t in self.crossing_timestamps if (timestamp - t) <= 60.0]
             elapsed_sec = max(5.0, min(60.0, timestamp - self.tripwire_start_time))
             self.flow_vpm = (len(self.crossing_timestamps) / elapsed_sec) * 60.0
 
-            # VIP 3: BẢN ĐỒ NHIỆT MẬT ĐỘ GIAO THÔNG (TRAFFIC DENSITY HEATMAP)
+            # Traffic Density Heatmap accumulation
             if self.enable_heatmap:
                 grid_h, grid_w = img_h // 4, img_w // 4
                 if self.heatmap_acc is None or self.heatmap_acc.shape != (grid_h, grid_w):
                     self.heatmap_acc = np.zeros((grid_h, grid_w), dtype=np.float32)
 
-                # Phai mờ dần theo thời gian (exponential decay)
                 self.heatmap_acc *= 0.992
 
-                # Tích tụ nhiệt theo dấu chân của các xe đang di chuyển
                 for (x1, y1, x2, y2, cname, tid, spd) in active_render_vehicles:
                     hx1 = max(0, int(x1 * 0.25))
                     hy1 = max(0, int(y1 * 0.25))
                     hx2 = min(grid_w, int(x2 * 0.25))
                     hy2 = min(grid_h, int(y2 * 0.25))
                     if hx2 > hx1 and hy2 > hy1:
-                        # Xe đi chậm / ùn ứ tỏa nhiệt cao hơn xe chạy nhanh
                         heat_val = 3.6 if (spd is not None and spd < 20.0) else 1.5
                         self.heatmap_acc[hy1:hy2, hx1:hx2] += heat_val
 
                 np.clip(self.heatmap_acc, 0, 100.0, out=self.heatmap_acc)
 
-                # Tạo lớp phủ màu JET bán trong suốt
                 norm_heat = np.clip((self.heatmap_acc / 22.0) * 255.0, 0, 255).astype(np.uint8)
                 color_heat = cv2.applyColorMap(norm_heat, cv2.COLORMAP_JET)
                 color_heat_full = cv2.resize(color_heat, (img_w, img_h), interpolation=cv2.INTER_LINEAR)
@@ -380,8 +350,7 @@ class VehicleDetector:
                     annotated_frame, 0.65, color_heat_full, 0.35, 0
                 )[heat_idx]
 
-                # Badge trạng thái Heatmap ở góc trên bên phải
-                heat_badge = "[ HEATMAP: BAT (Phim 'H' de tat/bat) ]"
+                heat_badge = "[ HEATMAP: ON (Key 'H' to toggle) ]"
                 cv2.putText(
                     annotated_frame, 
                     heat_badge, 
@@ -393,14 +362,14 @@ class VehicleDetector:
                     cv2.LINE_AA
                 )
 
-            # VIP 1: VẼ VẠCH ẢO ĐẾM LƯU LƯỢNG XE (VIRTUAL TRIPWIRE)
-            trip_color = (255, 205, 0) # Neon Sky Blue / Cyan (BGR)
+            # Draw virtual tripwire line
+            trip_color = (255, 205, 0)
             trip_thick = max(2, int(img_h / 950))
             cv2.line(annotated_frame, (line_x1, line_y), (line_x2, line_y), trip_color, trip_thick, cv2.LINE_AA)
             cv2.circle(annotated_frame, (line_x1, line_y), trip_thick * 2, (0, 255, 255), -1)
             cv2.circle(annotated_frame, (line_x2, line_y), trip_thick * 2, (0, 255, 255), -1)
 
-            trip_label = f"[ VACH DEM LUU LUONG: {self.tripwire_total} xe da qua | {int(self.flow_vpm)} xe/phut ]"
+            trip_label = f"[ TRIPWIRE: {self.tripwire_total} crossed | {int(self.flow_vpm)} veh/min ]"
             cv2.putText(
                 annotated_frame, 
                 trip_label, 
@@ -412,7 +381,7 @@ class VehicleDetector:
                 cv2.LINE_AA
             )
 
-            # Hiệu ứng vòng tròn lóe sáng tại điểm xe vừa cắt qua vạch
+            # Crossing flash pulse
             surviving_crossings = []
             for rx, ry, rt in self.recent_crossings:
                 dt = timestamp - rt
@@ -422,7 +391,7 @@ class VehicleDetector:
                     surviving_crossings.append((rx, ry, rt))
             self.recent_crossings = surviving_crossings
 
-            # VẼ BOUNDING BOX CỦA TỪNG PHƯƠNG TIỆN
+            # Render bounding boxes and tracking IDs
             for (x1, y1, x2, y2, cname, tid_show, speed_kmh) in active_render_vehicles:
                 color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
@@ -441,7 +410,6 @@ class VehicleDetector:
                     cv2.LINE_AA
                 )
 
-        # Vận tốc trung bình của toàn bộ dòng xe
         avg_speed_kmh = float(np.mean(active_speeds)) if active_speeds else 0.0
 
         tripwire_info = {

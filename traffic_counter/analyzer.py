@@ -44,7 +44,6 @@ class VideoTrafficAnalyzer:
         self.output_evidence_dir = output_evidence_dir
         os.makedirs(self.output_evidence_dir, exist_ok=True)
 
-        # Khởi tạo 2 module lõi với cấu hình tối ưu cho CCTV
         self.vehicle_detector = VehicleDetector(
             model_name=model_name,
             confidence_thresh=confidence_thresh,
@@ -57,7 +56,6 @@ class VideoTrafficAnalyzer:
         self.emitter = IncidentEventEmitter(webhook_url=webhook_url)
 
     def _resize_maintain_aspect(self, img: cv2.Mat, max_h: int = 760, max_w: int = 1280) -> cv2.Mat:
-        """Resize giữ nguyên tỉ lệ gốc để không làm méo video dạng dọc hoặc siêu rộng"""
         h, w = img.shape[:2]
         scale = min(max_w / float(w), max_h / float(h), 1.0)
         if scale < 1.0:
@@ -75,7 +73,7 @@ class VideoTrafficAnalyzer:
     ):
         cap = cv2.VideoCapture(video_source)
         if not cap.isOpened():
-            print(f"[VideoTrafficAnalyzer] LỖI: Không thể mở video source: {video_source}")
+            print(f"[VideoTrafficAnalyzer] ERROR: Cannot open video source: {video_source}")
             return
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -86,8 +84,8 @@ class VideoTrafficAnalyzer:
         delay_ms = max(1, int(1000.0 / target_fps)) if target_fps and target_fps > 0 else 30
 
         print(f"[VideoTrafficAnalyzer] Video Source: {video_source}")
-        print(f"[VideoTrafficAnalyzer] Source FPS: {source_fps:.1f} | Display Target FPS: {target_fps} (Step: {step_frames} frames)")
-        print(f"[VideoTrafficAnalyzer] Ngưỡng tốc độ ùn tắc: < {self.jam_speed_thresh_kmh} km/h")
+        print(f"[VideoTrafficAnalyzer] Source FPS: {source_fps:.1f} | Target Display FPS: {target_fps} (Step: {step_frames} frames)")
+        print(f"[VideoTrafficAnalyzer] Congestion Speed Threshold: < {self.jam_speed_thresh_kmh} km/h")
 
         frame_idx = 0
         start_time = time.time()
@@ -107,7 +105,6 @@ class VideoTrafficAnalyzer:
                 video_time_sec = frame_idx / source_fps if source_fps > 0 else (curr_time - start_time)
                 is_emit_turn = (video_time_sec - last_emit_time) >= self.sample_interval_sec
 
-                # Chạy phân tích nhận diện xe, tracking tốc độ và nước
                 annotated_frame, alert_info = self._analyze_single_frame(
                     frame=frame, 
                     frame_idx=frame_idx, 
@@ -118,18 +115,17 @@ class VideoTrafficAnalyzer:
                 if is_emit_turn:
                     last_emit_time = video_time_sec
 
-                # Hiển thị trực tiếp có vẽ bounding box và vận tốc
                 if display_preview:
                     preview_img = self._resize_maintain_aspect(annotated_frame)
-                    cv2.imshow(f"SafeRoute AI - {self.camera_id}", preview_img)
+                    cv2.imshow(f"Traffic Surveillance - {self.camera_id}", preview_img)
                     
                     key = cv2.waitKey(delay_ms) & 0xFF
                     if key in [ord('q'), 27]:
                         break
                     elif key in [ord('h'), ord('H')]:
                         self.vehicle_detector.enable_heatmap = not self.vehicle_detector.enable_heatmap
-                        state_str = "BẬT" if self.vehicle_detector.enable_heatmap else "TẮT"
-                        print(f"\n[SafeRoute AI VIP] Đã chuyển đổi Heatmap: {state_str}")
+                        state_str = "ENABLED" if self.vehicle_detector.enable_heatmap else "DISABLED"
+                        print(f"\n[TrafficSurveillance] Heatmap toggled: {state_str}")
 
                 if max_duration_sec and (curr_time - start_time) > max_duration_sec:
                     break
@@ -139,7 +135,7 @@ class VideoTrafficAnalyzer:
             if display_preview:
                 cv2.destroyAllWindows()
 
-            # Tự động xuất ảnh tổng kết và file JSON vào traffic_counter/outputs/
+            # Export summary image and JSON report to outputs/
             if hasattr(self, '_last_summary') and self._last_summary is not None:
                 outputs_dir = Path(__file__).resolve().parent / "outputs"
                 outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -163,62 +159,56 @@ class VideoTrafficAnalyzer:
             print("[VideoTrafficAnalyzer] Processing completed.")
 
     def _analyze_single_frame(self, frame, frame_idx: int, should_emit: bool, timestamp: Optional[float] = None):
-        # 1. Đếm xe, Tracking ID, Vạch ảo Tripwire và Heatmap
         total_vehicles, breakdown, annotated_frame, avg_speed_kmh, tripwire_info = self.vehicle_detector.detect_and_count(
             frame, timestamp=timestamp
         )
         total_crossed = tripwire_info.get("total_crossed", 0)
         flow_vpm = tripwire_info.get("flow_vpm", 0.0)
 
-        # 2. Kiểm tra có nước hay không
         has_water, water_confidence, water_mask = self.water_detector.detect_water(frame)
 
-        # 3. TIÊU CHÍ ÙN TẮC THỰC SỰ CHO GIAO THÔNG VIỆT NAM:
-        # Đường Việt Nam rất đông xe, nếu chỉ đếm số lượng thì lúc nào cũng báo kẹt!
-        # Do đó: Chỉ báo ÙN TẮC khi xe đông (>= threshold) VÀ Vận tốc trung bình dòng xe < jam_speed_thresh_kmh (15 km/h).
+        # Real congestion condition: high vehicle density AND low average speed
         has_speed = (avg_speed_kmh > 0)
         is_jammed = (total_vehicles >= self.congested_threshold) and (has_speed and avg_speed_kmh < self.jam_speed_thresh_kmh)
 
         alert_type = "NORMAL"
         alert_level = "INFO"
-        speed_desc = f"{avg_speed_kmh:.1f} km/h" if has_speed else "Đang khởi tạo tốc độ..."
+        speed_desc = f"{avg_speed_kmh:.1f} km/h" if has_speed else "Initializing speed..."
 
         if is_jammed and has_water:
             alert_type = "WATER_AND_CONGESTION"
             alert_level = "CRITICAL"
-            message = f"CẢNH BÁO: Mặt đường có nước kết hợp ùn tắc giao thông ({total_vehicles} xe, V={speed_desc})."
+            message = f"CRITICAL: Road surface water detected with heavy traffic congestion ({total_vehicles} vehicles, Speed: {speed_desc})."
         elif has_water:
             alert_type = "WATER_DETECTED"
             alert_level = "WARNING"
-            message = f"Phát hiện mặt đường có nước / ướt (Số lượng xe: {total_vehicles}, Vận tốc: {speed_desc})."
+            message = f"Wet road surface / standing water detected (Vehicle count: {total_vehicles}, Speed: {speed_desc})."
         elif is_jammed:
             alert_type = "TRAFFIC_JAM"
             alert_level = "WARNING"
-            message = f"ÙN TẮC GIAO THÔNG: Mật độ xe cao ({total_vehicles} xe) và dòng xe di chuyển chậm/dừng (Vận tốc: {speed_desc})."
+            message = f"Traffic Congestion: High vehicle density ({total_vehicles} vehicles) with slow/stopped flow (Speed: {speed_desc})."
         else:
-            flow_status = "Lưu thông thông suốt" if not (total_vehicles >= self.congested_threshold) else "Đường đông nhưng lưu thông tốt"
-            message = f"Giao thông: {flow_status} ({total_vehicles} xe, Vận tốc: {speed_desc}, Lưu lượng: {int(flow_vpm)} xe/phút)."
+            flow_status = "Smooth Flow" if not (total_vehicles >= self.congested_threshold) else "Heavy Density, Flowing"
+            message = f"Traffic: {flow_status} ({total_vehicles} vehicles, Speed: {speed_desc}, Flow: {int(flow_vpm)} veh/min)."
 
-        flow_tag = "[!] ÙN TẮC" if is_jammed else ("[✔] LƯU THÔNG" if has_speed else "[...] ĐANG ĐO...")
-        water_tag = f"[!] CÓ NƯỚC ({int(water_confidence * 100)}%)" if has_water else "[✔] KHÔ"
-        status_tag = "[!]" if (is_jammed or has_water) else "[✔]"
+        flow_tag = "[!] JAMMED" if is_jammed else ("[OK] FLOWING" if has_speed else "[...] MEASURING...")
+        water_tag = f"[!] WATER ({int(water_confidence * 100)}%)" if has_water else "[OK] DRY"
+        status_tag = "[!]" if (is_jammed or has_water) else "[OK]"
         ts_str = f"{timestamp:05.1f}s" if timestamp is not None else "00.0s"
-        print(f"[{self.camera_id} | {ts_str}] {status_tag} Tổng: {total_vehicles:2d} xe (Xe máy:{breakdown.get('motorcycle',0):2d}, Ôtô:{breakdown.get('car',0):2d}) | Lưu lượng: {int(flow_vpm):2d} xe/p (Qua vạch: {total_crossed} xe) | Tốc độ TB: {speed_desc} {flow_tag} | Mặt đường: {water_tag}")
+        print(f"[{self.camera_id} | {ts_str}] {status_tag} Total: {total_vehicles:2d} veh (Moto:{breakdown.get('motorcycle',0):2d}, Car:{breakdown.get('car',0):2d}) | Flow: {int(flow_vpm):2d} vpm (Crossed: {total_crossed} veh) | Speed: {speed_desc} {flow_tag} | Road: {water_tag}")
 
-        # VẼ HUD THÔNG TIN VIP TO RÕ TRÊN ẢNH (Tự co giãn theo độ phân giải)
+        # Render HUD Dashboard
         img_h, img_w = annotated_frame.shape[:2]
         hud_scale = max(0.65, min(1.8, img_w / 900.0))
         hud_thick = max(1, int(hud_scale * 1.8))
         banner_h = int(108 * hud_scale)
         hud_color = (0, 0, 255) if alert_level == "CRITICAL" else ((0, 165, 255) if alert_level == "WARNING" else (0, 255, 0))
 
-        # Nền banner xám đậm phía trên
         cv2.rectangle(annotated_frame, (10, 10), (min(img_w - 10, int(760 * hud_scale)), banner_h), (20, 20, 20), -1)
         cv2.rectangle(annotated_frame, (10, 10), (min(img_w - 10, int(760 * hud_scale)), banner_h), hud_color, 2)
         
-        status_speed_text = "ÙN TẮC" if is_jammed else ("LƯU THÔNG TỐT" if has_speed else "ĐANG ĐO...")
+        status_speed_text = "JAMMED" if is_jammed else ("FLOWING" if has_speed else "MEASURING...")
         
-        # Dòng 1: Số xe hiện tại & Vận tốc
         cv2.putText(
             annotated_frame, 
             f"VEHICLES: {total_vehicles} | SPEED: {speed_desc} ({status_speed_text})", 
@@ -230,7 +220,6 @@ class VideoTrafficAnalyzer:
             cv2.LINE_AA
         )
         
-        # Dòng 2: VIP 1 - Lưu lượng xe qua vạch ảo
         cv2.putText(
             annotated_frame, 
             f"TRIPWIRE FLOW: {total_crossed} CROSSED | {int(flow_vpm)} VEH/MIN", 
@@ -242,7 +231,6 @@ class VideoTrafficAnalyzer:
             cv2.LINE_AA
         )
         
-        # Dòng 3: Trạng thái & Nước ngập
         cv2.putText(
             annotated_frame, 
             f"STATUS: {alert_type} [{alert_level}] | WATER: {'YES' if has_water else 'NO'}", 
@@ -254,7 +242,6 @@ class VideoTrafficAnalyzer:
             cv2.LINE_AA
         )
 
-        # 4. Lưu ảnh snapshot và Emit event JSON khi đến chu kỳ (mặc định 5s / lần)
         if should_emit:
             prefix = "alert" if alert_level in ["WARNING", "CRITICAL"] else "snapshot"
             sec_str = f"{timestamp:05.1f}s" if timestamp is not None else f"{int(time.time())}s"
