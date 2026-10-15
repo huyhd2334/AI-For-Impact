@@ -12,19 +12,10 @@ class TrafficDensityLevel(str, Enum):
     CONGESTED = "congested" # Kẹt cứng / ùn tắc kéo dài
 
 
-class WaterLevelCategory(str, Enum):
-    NONE = "none"                  # Khô ráo
-    WET_SURFACE = "wet_surface"    # Mặt đường ẩm ướt, không ngập
-    SHALLOW = "shallow"            # Ngập mép lốp (< 15cm)
-    MODERATE = "moderate"          # Ngập nửa bánh xe (15 - 30cm)
-    CRITICAL = "critical"          # Ngập chạm pô xe / trên bánh (> 35cm)
-
-
 class HazardType(str, Enum):
-    FLOOD = "flood"
-    TRAFFIC_CONGESTION = "traffic_congestion"
-    FLOOD_AND_CONGESTION = "flood_and_congestion"  # Ngập nước gây tắc nghẽn giao thông (Nguy hiểm nhất)
-    STALLED_VEHICLES = "stalled_vehicles"          # Xe chết máy hàng loạt
+    WATER_DETECTED = "water_detected"              # Phát hiện có nước trên mặt đường
+    TRAFFIC_CONGESTION = "traffic_congestion"      # Ùn tắc giao thông
+    WATER_AND_CONGESTION = "water_and_congestion"  # Mặt đường có nước kết hợp ùn tắc
     CLEAR = "clear"
 
 

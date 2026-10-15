@@ -1,25 +1,26 @@
-# Module: Traffic Camera & Flood Analyzer (SafeRoute AI)
+# Module: Traffic Counter & Congestion Analyzer
 
-Module này đảm nhận vai trò **Agent 1: Camera Monitoring** trong hệ thống **SafeRoute AI**, chuyên phân tích luồng video camera giao thông để:
-1. **Đếm và ước lượng mật độ phương tiện** (`low`, `moderate`, `heavy`, `congested`).
-2. **Nhận diện ngập nước & đo mức ngập ước lượng** qua vật mốc (bánh xe, pů xe, chân người).
-3. **Phát hiện tổ hợp rủi ro kép (Compound Hazard)**: Khi mặt đường vừa ngập sâu vừa đông đúc xe cộ $\rightarrow$ Phát cảnh báo khẩn cấp và đề xuất điều phối CSGT.
-4. **Emit sự kiện chuẩn hóa (Pydantic Schema)**: Xuất file JSON outbox, lưu ảnh bằng chứng (`evidence`) và push Webhook sang Backend FastAPI.
+Module đảm nhận phân tích luồng camera giao thông:
+1. **Nhận diện & đếm số lượng phương tiện** theo chủng loại đặc thù Việt Nam (xe máy, ô tô con, xe tải, xe buýt, xe đạp).
+2. **Đo lưu lượng qua vạch ảo (Virtual Tripwire)** và tính tốc độ xe/phút (Flow VPM).
+3. **Phát hiện ùn tắc giao thông thực sự**: Kết hợp số lượng xe và vận tốc trung bình di chuyển (< 15 km/h).
+4. **Phát hiện có nước trên mặt đường (`has_water: bool`)**: Nhận diện vùng đọng nước/ẩm ướt trên mặt đường phản quang qua HSV & Laplacian (nhận diện trạng thái Có/Không, không đo độ sâu).
+5. **Xuất kết quả tự động**: Lưu ảnh snapshot HUD (`.jpg`) và tệp chỉ số cấu trúc (`.json`) vào thư mục `outputs/`.
 
 ---
 
 ## Cấu trúc thư mục
 
 ```
-traffic_camera_analyzer/
-├── schemas.py              # Định nghĩa Pydantic schema chuẩn TrafficIncidentEvent
-├── vehicle_counter.py      # Module đếm xe (YOLOv8 + Fallback Background Subtraction)
-├── water_detector.py       # Module phân tích nước ngập (Heuristic CV + VLM Prompting)
-├── event_emitter.py        # Module phát tín hiệu (Console, Lưu JSON, Gửi Webhook)
-├── analyzer.py             # Pipeline chính kết nối các module
-├── generate_mock_video.py  # Script tạo video giả lập để test ngay lập tức
-├── main.py                 # CLI Runner
-└── requirements.txt        # Các thư viện phụ thuộc
+traffic_counter/
+├── schemas.py              # Định nghĩa schema chuẩn TrafficIncidentEvent
+├── vehicle_counter.py      # Nhận diện YOLOv8, ByteTrack, vạch ảo Tripwire & Density Heatmap
+├── water_detector.py       # Phát hiện mặt đường có nước (HSV phản quang + Laplacian)
+├── event_emitter.py        # Xuất sự kiện JSON & Webhook
+├── analyzer.py             # Pipeline phân tích video/ảnh và xuất kết quả
+├── generate_mock_video.py  # Script tạo video giả lập chạy thử
+├── main.py                 # Điểm khởi chạy CLI
+└── requirements.txt        # Thư viện phụ thuộc
 ```
 
 ---
@@ -28,26 +29,48 @@ traffic_camera_analyzer/
 
 ### 1. Cài đặt thư viện
 ```bash
-pip install -r traffic_camera_analyzer/requirements.txt
+pip install -r traffic_counter/requirements.txt
 ```
 
-### 2. Chạy thử với video tự động giả lập (Không cần chuẩn bị video trước)
+### 2. Chạy với ảnh tĩnh
 ```bash
-python -m traffic_camera_analyzer.main --mock
+python -m traffic_counter.main --source data_test/sample_day.jpg
 ```
 
-### 3. Chạy với video camera thực tế hoặc luồng RTSP
+### 3. Chạy với video camera hoặc luồng RTSP
 ```bash
-python -m traffic_camera_analyzer.main --source "duong_ngap.mp4" --cam-id "CAM_NGATU_HANGXANH" --interval 2.0 --preview
+python -m traffic_counter.main --source path/to/video.mp4 --preview --heatmap
 ```
+- Phím `Q` hoặc `ESC`: Thoát xem trực tiếp.
+- Phím `H`: Bật/Tắt bản đồ nhiệt mật độ giao thông (Heatmap).
 
 ---
 
-## Logic Tổ hợp Sự kiện (Compound Event Logic)
+## Định dạng JSON Output (`outputs/<source_id>_traffic.json`)
 
-| Mật độ xe | Tình trạng nước | Loại sự cố (`HazardType`) | Mức độ (`Severity`) | Hành động đề xuất CSGT |
-| :--- | :--- | :--- | :--- | :--- |
-| **Đông / Kẹt cứng** | **Ngập vừa / sâu** | `flood_and_congestion` | 🚨 **CRITICAL** | Cử CSGT phân luồng khẩn cấp, chặn đầu đường cảnh báo xe máy |
-| Bình thường | Ngập sâu (>30cm) | `flood` | ⚠️ **HIGH** | Đặt biển cảnh báo điểm ngập sâu |
-| Kẹt cứng | Không ngập | `traffic_congestion` | 🟡 **MEDIUM** | Điều tiết nhịp đèn giao thông |
-| Thông thoáng | Khô ráo | `clear` | 🟢 **LOW** | Không cần xử lý |
+```json
+{
+  "timestamp": "2026-10-15T21:55:43.518286",
+  "camera_id": "CAM_BINHTHANH_01",
+  "traffic_status": "CROWDED",
+  "congestion_level": 2,
+  "congestion_description": "Giao thông: Đường đông nhưng lưu thông tốt...",
+  "total_vehicles_present": 46,
+  "vehicle_breakdown": {
+    "motorcycle": 41,
+    "car": 4,
+    "bus": 0,
+    "truck": 0,
+    "bicycle": 1
+  },
+  "tripwire_counting": {
+    "total_crossed": 0,
+    "flow_vehicles_per_min": 0.0
+  },
+  "average_speed_kmh": 0.0,
+  "is_jammed": false,
+  "has_water": false,
+  "water_confidence": 0.0,
+  "alert_level": "INFO"
+}
+```

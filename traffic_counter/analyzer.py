@@ -184,13 +184,13 @@ class VideoTrafficAnalyzer:
         speed_desc = f"{avg_speed_kmh:.1f} km/h" if has_speed else "Đang khởi tạo tốc độ..."
 
         if is_jammed and has_water:
-            alert_type = "FLOOD_AND_CONGESTION"
+            alert_type = "WATER_AND_CONGESTION"
             alert_level = "CRITICAL"
-            message = f"CẢNH BÁO NGUY HIỂM: Đường ngập nước kết hợp dòng xe bị kẹt cứng ({total_vehicles} xe, V={speed_desc}). Xe có nguy cơ chết máy hàng loạt!"
+            message = f"CẢNH BÁO: Mặt đường có nước kết hợp ùn tắc giao thông ({total_vehicles} xe, V={speed_desc})."
         elif has_water:
-            alert_type = "FLOOD_DETECTED"
+            alert_type = "WATER_DETECTED"
             alert_level = "WARNING"
-            message = f"Phát hiện mặt đường ngập nước / trơn trượt (Số lượng xe: {total_vehicles}, Vận tốc: {speed_desc})."
+            message = f"Phát hiện mặt đường có nước / ướt (Số lượng xe: {total_vehicles}, Vận tốc: {speed_desc})."
         elif is_jammed:
             alert_type = "TRAFFIC_JAM"
             alert_level = "WARNING"

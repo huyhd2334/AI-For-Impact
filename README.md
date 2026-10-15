@@ -72,6 +72,8 @@ Nhận diện phương tiện giao thông đặc thù Việt Nam, đếm lưu l�
   - `tripwire_counting`: `total_crossed` và `flow_vehicles_per_min`
   - `average_speed_kmh`: Vận tốc trung bình của các xe đang di chuyển
   - `is_jammed`: Boolean cảnh báo ùn tắc
+  - `has_water`: Boolean phát hiện mặt đường có nước (`true`/`false`, không đo độ sâu)
+  - `water_confidence`: Độ tin cậy phát hiện nước
 
 ### Cách chạy:
 ```bash

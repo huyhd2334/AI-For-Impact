@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--model", type=str, default=default_model, help=f"Mô hình AI nhận diện (mặc định: {default_model})")
     parser.add_argument("--conf", type=float, default=0.18, help="Ngưỡng tin cậy (Confidence threshold, mặc định 0.18)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Kích thước ảnh inference (1280 giúp bắt xe nhỏ ở xa góc CCTV)")
-    parser.add_argument("--water-thresh", type=float, default=0.05, help="Ngưỡng diện tích nước để kích hoạt cảnh báo ngập (mặc định 0.05 = 5%%)")
+    parser.add_argument("--water-thresh", type=float, default=0.05, help="Ngưỡng diện tích để phát hiện mặt đường có nước (mặc định 0.05 = 5%%)")
     parser.add_argument("--jam-speed", type=float, default=15.0, help="Vận tốc trung bình dưới ngưỡng này (km/h) mới báo ùn tắc (mặc định 15.0)")
     parser.add_argument("--sahi", action="store_true", help="Kích hoạt chế độ SAHI Slicing (chia nhỏ ảnh 4K để bắt trọn xe nhỏ ở xa)")
     parser.add_argument("--heatmap", action="store_true", help="VIP 3: Bật bản đồ nhiệt mật độ giao thông (Traffic Density Heatmap)")
