@@ -4,6 +4,22 @@ from pathlib import Path
 from .analyzer import VideoTrafficAnalyzer
 
 
+def resolve_model_path(name: str) -> str:
+    if os.path.exists(name):
+        return name
+    curr_dir = Path(__file__).resolve().parent
+    candidates = [
+        curr_dir / "weights" / name,
+        Path("weights") / name,
+        Path("traffic_counter/weights") / name,
+        Path(f"traffic_counter/weights/{name}"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return name
+
+
 def main():
     parser = argparse.ArgumentParser(description="Traffic Surveillance & Counter CLI")
     parser.add_argument("--source", type=str, default=None, help="Path to video file (.mp4) or image (.jpg) or RTSP stream URL")
@@ -12,14 +28,16 @@ def main():
     parser.add_argument("--preview", action="store_true", help="Display visual live preview window")
     parser.add_argument("--fps", type=float, default=10.0, help="Target processing/display FPS (default: 10.0)")
     model_candidates = [
+        "traffic_counter/weights/vn_traffic_surveillance.pt",
         "weights/vn_traffic_surveillance.pt",
         "vn_traffic_surveillance.pt",
+        "traffic_counter/weights/yolov8n.pt",
         "weights/yolov8n.pt",
         "yolov8n.pt",
         "rtdetr-x.pt",
         "yolov8s.pt"
     ]
-    default_model = "weights/vn_traffic_surveillance.pt"
+    default_model = "traffic_counter/weights/vn_traffic_surveillance.pt"
     for cand in model_candidates:
         if os.path.exists(cand):
             default_model = cand
@@ -30,6 +48,7 @@ def main():
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference image resolution (default: 1280 for distant vehicles)")
     parser.add_argument("--water-thresh", type=float, default=0.05, help="Area ratio threshold to trigger water presence (default: 0.05 = 5%%)")
     parser.add_argument("--jam-speed", type=float, default=15.0, help="Average speed threshold (km/h) below which traffic is congested (default: 15.0)")
+    parser.add_argument("--jam-thresh", type=int, default=12, help="Vehicle count threshold to consider traffic crowded/jammed (default: 12)")
     parser.add_argument("--sahi", action="store_true", help="Enable SAHI slicing for ultra-dense / 4K small vehicles")
     parser.add_argument("--heatmap", action="store_true", help="Enable traffic density accumulation heatmap")
     parser.add_argument("--tripwire-y", type=float, default=0.58, help="Virtual tripwire vertical position ratio (default: 0.58 = 58%% of frame height)")
@@ -55,6 +74,7 @@ def main():
     analyzer = VideoTrafficAnalyzer(
         camera_id=args.cam_id,
         sample_interval_sec=args.interval,
+        congested_vehicle_threshold=args.jam_thresh,
         model_name=model_path,
         confidence_thresh=args.conf,
         imgsz=args.imgsz,

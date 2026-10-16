@@ -164,50 +164,78 @@ class VideoTrafficAnalyzer:
         )
         total_crossed = tripwire_info.get("total_crossed", 0)
         flow_vpm = tripwire_info.get("flow_vpm", 0.0)
+        stopped_vehicles = tripwire_info.get("stopped_vehicles", 0)
+        slow_vehicles = tripwire_info.get("slow_vehicles", 0)
+        speed_measured_count = tripwire_info.get("speed_measured_count", 0)
+        has_speed_data = (speed_measured_count >= 2)
 
         has_water, water_confidence, water_mask = self.water_detector.detect_water(frame)
 
-        # Real congestion condition: high vehicle density AND low average speed
-        has_speed = (avg_speed_kmh > 0)
-        is_jammed = (total_vehicles >= self.congested_threshold) and (has_speed and avg_speed_kmh < self.jam_speed_thresh_kmh)
+        # Smart Multi-factor Traffic Congestion Analysis
+        if has_speed_data:
+            # Video mode with active speed measurements
+            is_low_speed = (avg_speed_kmh < self.jam_speed_thresh_kmh)
+            slow_or_stopped_ratio = (stopped_vehicles + slow_vehicles) / float(max(1, total_vehicles))
+            is_high_stop_ratio = (slow_or_stopped_ratio >= 0.35 and total_vehicles >= self.congested_threshold)
+            
+            is_jammed = (
+                (total_vehicles >= self.congested_threshold and (is_low_speed or is_high_stop_ratio))
+                or (total_vehicles >= 25)
+            )
+            is_crowded = (total_vehicles >= self.congested_threshold or avg_speed_kmh < 22.0)
+            speed_desc = f"{avg_speed_kmh:.1f} km/h"
+        else:
+            # Static image or initial tracking warmup: evaluate via spatial vehicle density
+            is_jammed = (total_vehicles >= 20)
+            is_crowded = (total_vehicles >= self.congested_threshold)
+            speed_desc = "Static Scene" if frame_idx <= 2 else "Initializing..."
+
+        if is_jammed:
+            congestion_level = 3
+            congestion_status = "HEAVY_CONGESTION"
+        elif is_crowded:
+            congestion_level = 2
+            congestion_status = "CROWDED"
+        else:
+            congestion_level = 1
+            congestion_status = "CLEAR"
 
         alert_type = "NORMAL"
         alert_level = "INFO"
-        speed_desc = f"{avg_speed_kmh:.1f} km/h" if has_speed else "Initializing speed..."
 
         if is_jammed and has_water:
             alert_type = "WATER_AND_CONGESTION"
             alert_level = "CRITICAL"
             message = f"CRITICAL: Road surface water detected with heavy traffic congestion ({total_vehicles} vehicles, Speed: {speed_desc})."
+        elif is_jammed:
+            alert_type = "TRAFFIC_JAM"
+            alert_level = "WARNING"
+            message = f"TRAFFIC CONGESTION: Heavy vehicle bottleneck ({total_vehicles} vehicles, Speed: {speed_desc}, Stopped: {stopped_vehicles})."
         elif has_water:
             alert_type = "WATER_DETECTED"
             alert_level = "WARNING"
             message = f"Wet road surface / standing water detected (Vehicle count: {total_vehicles}, Speed: {speed_desc})."
-        elif is_jammed:
-            alert_type = "TRAFFIC_JAM"
-            alert_level = "WARNING"
-            message = f"Traffic Congestion: High vehicle density ({total_vehicles} vehicles) with slow/stopped flow (Speed: {speed_desc})."
         else:
-            flow_status = "Smooth Flow" if not (total_vehicles >= self.congested_threshold) else "Heavy Density, Flowing"
+            flow_status = "Smooth Flow" if not is_crowded else "Heavy Density, Flowing"
             message = f"Traffic: {flow_status} ({total_vehicles} vehicles, Speed: {speed_desc}, Flow: {int(flow_vpm)} veh/min)."
 
-        flow_tag = "[!] JAMMED" if is_jammed else ("[OK] FLOWING" if has_speed else "[...] MEASURING...")
+        flow_tag = "[!] JAMMED" if is_jammed else ("[OK] FLOWING" if (has_speed_data and avg_speed_kmh >= self.jam_speed_thresh_kmh) else "[...] MEASURING...")
         water_tag = f"[!] WATER ({int(water_confidence * 100)}%)" if has_water else "[OK] DRY"
         status_tag = "[!]" if (is_jammed or has_water) else "[OK]"
         ts_str = f"{timestamp:05.1f}s" if timestamp is not None else "00.0s"
-        print(f"[{self.camera_id} | {ts_str}] {status_tag} Total: {total_vehicles:2d} veh (Moto:{breakdown.get('motorcycle',0):2d}, Car:{breakdown.get('car',0):2d}) | Flow: {int(flow_vpm):2d} vpm (Crossed: {total_crossed} veh) | Speed: {speed_desc} {flow_tag} | Road: {water_tag}")
+        print(f"[{self.camera_id} | {ts_str}] {status_tag} Total: {total_vehicles:2d} veh (Moto:{breakdown.get('motorcycle',0):2d}, Car:{breakdown.get('car',0):2d}, Stopped:{stopped_vehicles:2d}) | Flow: {int(flow_vpm):2d} vpm | Speed: {speed_desc} {flow_tag} | Status: {congestion_status}")
 
         # Render HUD Dashboard
         img_h, img_w = annotated_frame.shape[:2]
         hud_scale = max(0.65, min(1.8, img_w / 900.0))
         hud_thick = max(1, int(hud_scale * 1.8))
         banner_h = int(108 * hud_scale)
-        hud_color = (0, 0, 255) if alert_level == "CRITICAL" else ((0, 165, 255) if alert_level == "WARNING" else (0, 255, 0))
+        hud_color = (0, 0, 255) if (alert_level == "CRITICAL" or is_jammed) else ((0, 165, 255) if (alert_level == "WARNING" or is_crowded) else (0, 255, 0))
 
         cv2.rectangle(annotated_frame, (10, 10), (min(img_w - 10, int(760 * hud_scale)), banner_h), (20, 20, 20), -1)
         cv2.rectangle(annotated_frame, (10, 10), (min(img_w - 10, int(760 * hud_scale)), banner_h), hud_color, 2)
         
-        status_speed_text = "JAMMED" if is_jammed else ("FLOWING" if has_speed else "MEASURING...")
+        status_speed_text = "JAMMED" if is_jammed else ("FLOWING" if (has_speed_data and avg_speed_kmh >= self.jam_speed_thresh_kmh) else ("CROWDED" if is_crowded else "CLEAR"))
         
         cv2.putText(
             annotated_frame, 
@@ -267,9 +295,6 @@ class VideoTrafficAnalyzer:
             )
             self.emitter.emit(event)
 
-        congestion_level = 3 if is_jammed else (2 if total_vehicles >= self.congested_threshold else 1)
-        congestion_status = "HEAVY_CONGESTION" if is_jammed else ("CROWDED" if total_vehicles >= self.congested_threshold else "CLEAR")
-
         self._last_summary = {
             "annotated_frame": annotated_frame.copy(),
             "data": {
@@ -286,7 +311,9 @@ class VideoTrafficAnalyzer:
                     "total_crossed": total_crossed,
                     "flow_vehicles_per_min": round(flow_vpm, 1)
                 },
-                "average_speed_kmh": round(avg_speed_kmh, 1) if avg_speed_kmh is not None else None,
+                "average_speed_kmh": round(avg_speed_kmh, 1) if (has_speed_data and avg_speed_kmh is not None) else None,
+                "stopped_vehicles": stopped_vehicles,
+                "slow_vehicles": slow_vehicles,
                 "is_jammed": is_jammed,
                 "has_water": has_water,
                 "water_confidence": round(water_confidence, 2),

@@ -112,6 +112,8 @@ class VehicleDetector:
         breakdown = {"motorcycle": 0, "car": 0, "bus": 0, "truck": 0, "bicycle": 0}
         total_count = 0
         active_speeds = []
+        stopped_vehicles = 0
+        slow_vehicles = 0
 
         if self.use_yolo and self.yolo_model:
             raw_vehicles = []
@@ -233,7 +235,7 @@ class VehicleDetector:
                 if not is_duplicate:
                     clean_vehicles.append(v)
 
-            # Centroid tracking and stationary parked vehicle filtering
+            # Centroid tracking and speed estimation
             if not hasattr(self, 'next_track_id'):
                 self.next_track_id = 1
             if not hasattr(self, 'track_details'):
@@ -270,10 +272,17 @@ class VehicleDetector:
                 if best_id is not None:
                     td = self.track_details[best_id]
                     dt = timestamp - td['last_t']
-                    if dt > 0.04:
-                        raw_spd = (best_dist * self.px_to_meter / dt) * 3.6
-                        raw_spd = min(120.0, max(0.0, raw_spd))
-                        speed_kmh = (0.5 * td['prev_spd'] + 0.5 * raw_spd) if td['prev_spd'] > 0 else raw_spd
+                    if dt > 0.03:
+                        disp_px = best_dist
+                        if disp_px < 6.0:
+                            raw_spd = 0.0
+                        else:
+                            persp_scale = max(0.4, cy / float(img_h))
+                            m_per_px = (self.px_to_meter * 0.45) / persp_scale
+                            raw_spd = (disp_px * m_per_px / dt) * 3.6
+                            raw_spd = min(90.0, max(0.0, raw_spd))
+
+                        speed_kmh = (0.6 * td['prev_spd'] + 0.4 * raw_spd) if td['hit_count'] > 2 else raw_spd
                         td['prev_spd'] = speed_kmh
                     else:
                         speed_kmh = td['prev_spd']
@@ -283,11 +292,11 @@ class VehicleDetector:
                     td['last_t'] = timestamp
                     td['hit_count'] += 1
 
-                    # Flag stationary objects if movement < 16px over multiple frames
                     total_disp = math.hypot(cx - td['start_pos'][0], cy - td['start_pos'][1])
-                    if td['hit_count'] >= 3 and (timestamp - td['start_t']) >= 0.25:
-                        if total_disp < 16.0:
+                    if td['hit_count'] >= 3:
+                        if total_disp < 15.0 or (speed_kmh is not None and speed_kmh < 4.0):
                             td['is_stationary'] = True
+                            speed_kmh = 0.0
                         else:
                             td['is_stationary'] = False
                     tid_show = best_id
@@ -306,10 +315,13 @@ class VehicleDetector:
                     }
                     self.next_track_id += 1
 
-                # Discard stationary/parked vehicles from flow statistics
                 td_curr = self.track_details[tid_show]
-                if td_curr['is_stationary']:
-                    continue
+                is_vehicle_stopped = td_curr['is_stationary'] or (speed_kmh is not None and speed_kmh < 4.0)
+
+                if is_vehicle_stopped:
+                    stopped_vehicles += 1
+                elif speed_kmh is not None and speed_kmh < 12.0:
+                    slow_vehicles += 1
 
                 # Check virtual tripwire crossing
                 prev_y = td_curr.get('prev_pos', (cx, cy))[1]
@@ -326,7 +338,7 @@ class VehicleDetector:
                 else:
                     breakdown[cname] = 1
                 total_count += 1
-                if speed_kmh is not None and speed_kmh > 0:
+                if speed_kmh is not None:
                     active_speeds.append(speed_kmh)
 
                 active_render_vehicles.append((x1, y1, x2, y2, cname, tid_show, speed_kmh))
@@ -432,7 +444,10 @@ class VehicleDetector:
         tripwire_info = {
             "total_crossed": self.tripwire_total,
             "flow_vpm": self.flow_vpm,
-            "breakdown": self.tripwire_breakdown
+            "breakdown": self.tripwire_breakdown,
+            "stopped_vehicles": stopped_vehicles,
+            "slow_vehicles": slow_vehicles,
+            "speed_measured_count": len(active_speeds)
         }
 
         return total_count, breakdown, annotated_frame, avg_speed_kmh, tripwire_info
