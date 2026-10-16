@@ -82,9 +82,11 @@ def main():
         sidewalk_ratio = float(np.sum(sidewalk_mask > 0)) / float(img.shape[0] * img.shape[1])
 
         out_img_path = out_dir / f"{source_id}_segmented.jpg"
+        out_mask_path = out_dir / f"{source_id}_road_mask.png"
         out_json_path = out_dir / f"{source_id}_segmentation.json"
 
         cv2.imwrite(str(out_img_path), annotated)
+        cv2.imwrite(str(out_mask_path), road_mask)
 
         data = {
             "timestamp": datetime.now().isoformat(),
@@ -187,9 +189,12 @@ def main():
 
         if last_annotated is not None:
             out_img_path = out_dir / f"{source_id}_segmented.jpg"
+            out_mask_path = out_dir / f"{source_id}_road_mask.png"
             out_json_path = out_dir / f"{source_id}_segmentation.json"
 
             cv2.imwrite(str(out_img_path), last_annotated)
+            if last_road_mask is not None:
+                cv2.imwrite(str(out_mask_path), last_road_mask)
             polygons = segmenter.extract_road_polygons(last_road_mask) if last_road_mask is not None else []
             sidewalk_ratio = float(np.sum(last_sidewalk_mask > 0)) / float(w * h) if last_sidewalk_mask is not None else 0.0
 

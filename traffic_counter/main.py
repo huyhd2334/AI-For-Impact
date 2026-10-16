@@ -10,7 +10,19 @@ def main():
     parser.add_argument("--interval", type=float, default=5.0, help="Snapshot and event emission interval in seconds (default: 5.0s)")
     parser.add_argument("--preview", action="store_true", help="Display visual live preview window")
     parser.add_argument("--fps", type=float, default=10.0, help="Target processing/display FPS (default: 10.0)")
-    default_model = "vn_traffic_surveillance.pt" if os.path.exists("vn_traffic_surveillance.pt") else ("rtdetr-x.pt" if os.path.exists("rtdetr-x.pt") else "yolov8s.pt")
+    model_candidates = [
+        "weights/vn_traffic_surveillance.pt",
+        "vn_traffic_surveillance.pt",
+        "weights/yolov8n.pt",
+        "yolov8n.pt",
+        "rtdetr-x.pt",
+        "yolov8s.pt"
+    ]
+    default_model = "weights/vn_traffic_surveillance.pt"
+    for cand in model_candidates:
+        if os.path.exists(cand):
+            default_model = cand
+            break
     parser.add_argument("--model", type=str, default=default_model, help=f"Detection AI model weight path (default: {default_model})")
     parser.add_argument("--conf", type=float, default=0.18, help="Detection confidence threshold (default: 0.18)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference image resolution (default: 1280 for distant vehicles)")

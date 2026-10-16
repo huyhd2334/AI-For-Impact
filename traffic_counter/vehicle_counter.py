@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple, Optional
 import math
 import cv2
 import numpy as np
+import os
 
 
 class VehicleDetector:
@@ -45,20 +46,36 @@ class VehicleDetector:
         self.tripwire_start_time = None
         self.flow_vpm = 0.0
 
+        # Tìm kiếm đường dẫn file model trong weights/
+        model_path = model_name
+        if not os.path.exists(model_path):
+            candidates = [
+                os.path.join("weights", model_name),
+                os.path.join(os.path.dirname(__file__), "..", "weights", model_name),
+                os.path.join("weights", "vn_traffic_surveillance.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "weights", "vn_traffic_surveillance.pt"),
+                os.path.join("weights", "yolov8n.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "weights", "yolov8n.pt"),
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    model_path = c
+                    break
+
         try:
             import torch
             from ultralytics import YOLO
             self.device = 0 if torch.cuda.is_available() else "cpu"
             device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
-            self.yolo_model = YOLO(model_name)
+            self.yolo_model = YOLO(model_path)
             self.use_yolo = True
-            print(f"[VehicleDetector] Model: {model_name} | Device: {device_name} (device={self.device}) | imgsz={self.imgsz} | conf={self.confidence_thresh}")
+            print(f"[VehicleDetector] Model: {model_path} | Device: {device_name} (device={self.device}) | imgsz={self.imgsz} | conf={self.confidence_thresh}")
 
             if self.use_sahi:
                 from sahi import AutoDetectionModel
                 self.sahi_model = AutoDetectionModel.from_pretrained(
                     model_type="ultralytics",
-                    model_path=model_name,
+                    model_path=model_path,
                     confidence_threshold=confidence_thresh,
                     device=f"cuda:{self.device}" if self.device == 0 else "cpu"
                 )

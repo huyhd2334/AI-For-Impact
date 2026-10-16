@@ -57,7 +57,19 @@ class RoadSegmenter:
     def _init_twinlite(self, weights_path: Optional[str]):
         if weights_path is None:
             curr_dir = Path(__file__).resolve().parent
-            weights_path = str(curr_dir / "weights" / "best.pth")
+            candidates = [
+                curr_dir.parent / "weights" / "best.pth",
+                curr_dir.parent / "weights" / "twinlite_best.pth",
+                curr_dir / "weights" / "best.pth",
+                Path("weights/best.pth"),
+                Path("weights/twinlite_best.pth")
+            ]
+            for c in candidates:
+                if c.exists():
+                    weights_path = str(c)
+                    break
+            if weights_path is None:
+                weights_path = str(curr_dir.parent / "weights" / "best.pth")
 
         if not os.path.exists(weights_path):
             raise FileNotFoundError(f"[RoadSegmenter] Missing TwinLiteNet weights: {weights_path}")
