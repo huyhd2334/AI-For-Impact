@@ -234,6 +234,12 @@ class VehicleDetector:
             if not hasattr(self, 'track_details'):
                 self.track_details = {}
 
+            # Clean up obsolete tracks older than 3.0s
+            self.track_details = {
+                tid: td for tid, td in self.track_details.items()
+                if (timestamp - td['last_t']) <= 3.0
+            }
+
             line_thick = max(2, int(img_h / 850))
             font_scale = max(0.45, img_h / 3200.0)
             font_thick = max(1, int(img_h / 1800))
@@ -259,19 +265,20 @@ class VehicleDetector:
                 for tid, td in list(self.track_details.items()):
                     if tid in matched_tids:
                         continue
-                    if timestamp - td['last_t'] < 1.5:
+                    dt_since_seen = timestamp - td['last_t']
+                    if dt_since_seen < 2.0:
                         prev_box = td.get('last_box', (td['last_pos'][0]-bw/2, td['last_pos'][1]-bh/2, td['last_pos'][0]+bw/2, td['last_pos'][1]+bh/2))
                         iou, ios = self._calc_iou_ios(v["box"], prev_box)
                         dist = math.hypot(cx - td['last_pos'][0], cy - td['last_pos'][1])
-                        max_allowed_dist = max(55.0, float(bh) * 0.65) * y_factor
+                        max_allowed_dist = max(80.0, float(bh) * 1.5, 300.0 * dt_since_seen) * y_factor
 
-                        if iou > 0.25:
-                            score = 100.0 + iou * 50.0 - (dist / 100.0)
+                        if iou > 0.12:
+                            score = 100.0 + iou * 60.0 - (dist / 120.0)
                             if score > best_match_score:
                                 best_match_score = score
                                 best_id = tid
                         elif dist < max_allowed_dist:
-                            score = 50.0 - (dist / max_allowed_dist) * 30.0
+                            score = 60.0 - (dist / max_allowed_dist) * 40.0
                             if score > best_match_score:
                                 best_match_score = score
                                 best_id = tid
@@ -282,13 +289,12 @@ class VehicleDetector:
                 if best_id is not None:
                     matched_tids.add(best_id)
                     td = self.track_details[best_id]
-                    dt = timestamp - td['last_t']
                     
                     if 'pos_history' not in td:
                         td['pos_history'] = [(td['last_pos'][0], td['last_pos'][1], td['last_t'])]
                     td['pos_history'].append((cx, cy, timestamp))
-                    # Keep only positions within the last 1.0 second
-                    td['pos_history'] = [(hx, hy, ht) for (hx, hy, ht) in td['pos_history'] if (timestamp - ht) <= 1.0]
+                    # Retain positions within the last 0.8 seconds
+                    td['pos_history'] = [(hx, hy, ht) for (hx, hy, ht) in td['pos_history'] if (timestamp - ht) <= 0.8]
 
                     td['prev_pos'] = td['last_pos']
                     td['last_pos'] = (cx, cy)
@@ -296,33 +302,38 @@ class VehicleDetector:
                     td['last_t'] = timestamp
                     td['hit_count'] += 1
 
-                    # Measure speed over window (at least 0.20s) to eliminate frame jitter
+                    # Measure speed over window (at least 0.18s) to eliminate single-frame jitter
                     if len(td['pos_history']) >= 2:
                         hist_x, hist_y, hist_t = td['pos_history'][0]
                         w_dt = timestamp - hist_t
                         w_disp = math.hypot(cx - hist_x, cy - hist_y)
 
-                        if w_dt >= 0.20:
-                            # If vehicle moved less than 16px over the window, it is completely stopped
-                            if w_disp < 16.0:
+                        if w_dt >= 0.18:
+                            # Perspective scale: vehicles further up the frame (lower y) correspond to more meters per pixel
+                            norm_y = max(0.25, min(1.0, cy / float(img_h)))
+                            persp_factor = 0.35 + 0.65 * norm_y
+                            m_per_px = self.px_to_meter / persp_factor
+                            raw_spd = (w_disp * m_per_px / w_dt) * 3.6
+
+                            # If displacement is within bounding box jitter (< 5.0px) or speed < 3.5 km/h, mark as stopped
+                            if w_disp < 5.0 or raw_spd < 3.5:
                                 speed_kmh = 0.0
                                 is_vehicle_stopped = True
                             else:
-                                persp_scale = max(0.35, cy / float(img_h))
-                                m_per_px = (self.px_to_meter * 0.32) / persp_scale
-                                raw_spd = (w_disp * m_per_px / w_dt) * 3.6
-                                if raw_spd < 5.0:
-                                    speed_kmh = 0.0
-                                    is_vehicle_stopped = True
+                                raw_spd = min(90.0, raw_spd)
+                                prev_s = td.get('prev_spd')
+                                if prev_s is not None and prev_s > 0.0:
+                                    speed_kmh = round(0.55 * raw_spd + 0.45 * prev_s, 1)
                                 else:
-                                    speed_kmh = min(80.0, max(0.0, raw_spd))
+                                    speed_kmh = round(raw_spd, 1)
+                                is_vehicle_stopped = False
                             td['prev_spd'] = speed_kmh
                         else:
-                            speed_kmh = td['prev_spd']
-                            is_vehicle_stopped = (speed_kmh == 0.0)
+                            speed_kmh = td.get('prev_spd')
+                            is_vehicle_stopped = (speed_kmh == 0.0) if speed_kmh is not None else False
                     else:
-                        speed_kmh = 0.0
-                        is_vehicle_stopped = True
+                        speed_kmh = td.get('prev_spd')
+                        is_vehicle_stopped = (speed_kmh == 0.0) if speed_kmh is not None else False
 
                     tid_show = best_id
                 else:
@@ -337,12 +348,13 @@ class VehicleDetector:
                         'last_t': timestamp,
                         'hit_count': 1,
                         'is_stationary': False,
-                        'prev_spd': 0.0,
+                        'prev_spd': None,
                         'crossed_tripwire': False
                     }
                     matched_tids.add(tid_show)
                     self.next_track_id += 1
                     speed_kmh = None
+                    is_vehicle_stopped = False
 
                 td_curr = self.track_details[tid_show]
 

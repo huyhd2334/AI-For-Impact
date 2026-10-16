@@ -78,8 +78,9 @@ class VideoTrafficAnalyzer:
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         source_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        self.is_static_image = (0 < total_frames <= 2 or str(video_source).lower().endswith(('.jpg', '.jpeg', '.png')))
         step_frames = max(1, int(source_fps / target_fps)) if target_fps and target_fps > 0 else 1
-        if 0 < total_frames <= 2:
+        if self.is_static_image:
             step_frames = 1
         delay_ms = max(1, int(1000.0 / target_fps)) if target_fps and target_fps > 0 else 30
 
@@ -179,16 +180,20 @@ class VideoTrafficAnalyzer:
             is_high_stop_ratio = (slow_or_stopped_ratio >= 0.35 and total_vehicles >= self.congested_threshold)
             
             is_jammed = (
-                (total_vehicles >= self.congested_threshold and (is_low_speed or is_high_stop_ratio))
-                or (total_vehicles >= 25)
+                total_vehicles >= self.congested_threshold and (is_low_speed or is_high_stop_ratio)
             )
             is_crowded = (total_vehicles >= self.congested_threshold or avg_speed_kmh < 22.0)
             speed_desc = f"{avg_speed_kmh:.1f} km/h"
         else:
-            # Static image or initial tracking warmup: evaluate via spatial vehicle density
-            is_jammed = (total_vehicles >= 20)
-            is_crowded = (total_vehicles >= self.congested_threshold)
-            speed_desc = "Static Scene" if frame_idx <= 2 else "Initializing..."
+            # Static image or initial tracking warmup
+            if not getattr(self, 'is_static_image', False) and timestamp is not None and frame_idx <= 2:
+                is_jammed = False
+                is_crowded = (total_vehicles >= self.congested_threshold)
+                speed_desc = "Initializing..."
+            else:
+                is_jammed = (total_vehicles >= 20)
+                is_crowded = (total_vehicles >= self.congested_threshold)
+                speed_desc = "Static Scene"
 
         if is_jammed:
             congestion_level = 3
