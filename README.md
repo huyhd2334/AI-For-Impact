@@ -1,6 +1,6 @@
 # AI Road Intelligence & Traffic Surveillance
 
-Hệ thống thị giác máy tính (Computer Vision) toàn diện phục vụ quản lý giao thông và giám sát ngập lụt đô thị Việt Nam, tối ưu hóa cho camera CCTV độ phân giải cao (lên đến 4K).
+Hệ thống thị giác máy tính (Computer Vision) toàn diện phục vụ quản lý giao thông và giám sát an toàn đô thị Việt Nam, tối ưu hóa cho camera CCTV độ phân giải cao (lên đến 4K).
 
 Dự án được cấu trúc thành các module chuyên sâu và thư mục weights dùng chung:
 
@@ -21,7 +21,7 @@ AI_solution/
 │   ├── outputs/               # Kết quả xuất tự động: ảnh segmentation + file .json
 │   └── requirements.txt
 │
-├── traffic_counter/           # Module 2: Nhận diện, đếm lưu lượng xe & đánh giá ùn tắc (Traffic Counter)
+├── traffic_counter/           # Module 2: Nhận diện, đếm xe & đánh giá ùn tắc (Traffic Counter)
 │   ├── main.py                # Điểm khởi chạy phân tích camera giao thông
 │   ├── analyzer.py            # Quản lý luồng video, tính toán vận tốc & kết luận kẹt xe
 │   ├── vehicle_counter.py     # YOLOv8 Tracking, vạch ảo Tripwire & Density Heatmap
@@ -43,62 +43,22 @@ AI_solution/
 
 ---
 
-## 1. Module 1: Road Segmentation (`road_segmentation/`)
+## Cài đặt Weights Pretrained
 
-Phân đoạn mặt đường và vỉa hè đạt độ chính xác cao cả ngày lẫn đêm (xử lý bóng cây, ánh đèn đường ban đêm).
+Tải các file weights từ mục [GitHub Releases](https://github.com/huyhd2334/AI-For-Impact/releases) và đặt vào đúng vị trí:
 
-### Tính năng chính:
-- **Mô hình SOTA:** Tích hợp `facebook/mask2former-swin-small-cityscapes-semantic` kết hợp tự động tinh chỉnh hành lang (Corridor Fusion).
-- **Tăng tốc 4K bằng PyTorch CUDA:** Xử lý blending trực tiếp trên GPU VRAM (~11ms/frame 4K thay vì 500ms+ trên CPU).
-- **Hỗ trợ Realtime:** Tùy chọn TwinLiteNet siêu nhẹ (>100 FPS).
-
-### Output tự động (`road_segmentation/outputs/`):
-- `<source_id>_segmented.jpg`: Ảnh phân đoạn trực quan (Mặt đường xanh lá, vỉa hè tím neon).
-- `<source_id>_segmentation.json`: Toàn bộ thông số định lượng gồm:
-  - `road_area_ratio` & `road_area_percentage`: Tỷ lệ diện tích đường trên toàn khung hình.
-  - `sidewalk_area_ratio`: Tỷ lệ vỉa hè.
-  - `road_polygons`: Tọa độ đa giác hành lang mặt đường.
-  - `processing_time_ms`: Thời gian xử lý.
-
-### Cách chạy:
-```bash
-python -m road_segmentation.main --image path/to/image.jpg
-```
+1. **`traffic_counter/weights/vn_traffic_surveillance.pt`** (44.8 MB, YOLOv8 Medium huấn luyện riêng cho giao thông VN).
+2. **`road_segmentation/weights/best.pth`** (1.8 MB, TwinLiteNet cho chế độ realtime).
+3. *(Riêng Mask2Former SOTA sẽ tự động tải từ Hugging Face trong lần chạy đầu tiên, không cần nạp thủ công).*
 
 ---
 
-## 2. Module 2: Traffic Counter & Congestion Analysis (`traffic_counter/`)
+## 4 Lệnh Chạy Mạnh Nhất (Strongest Recommended Commands)
 
-Nhận diện phương tiện giao thông đặc thù Việt Nam, đếm lưu lượng, ước lượng vận tốc và cảnh báo kẹt xe chuẩn xác.
-
-### Tính năng chính:
-- **AI Model chuyên biệt giao thông VN:** Hỗ trợ mô hình huấn luyện riêng cho xe máy, ô tô con, xe buýt, xe tải, xe đạp (`vn_traffic_surveillance.pt`).
-- **Đếm lưu lượng vạch ảo (Virtual Tripwire):** Đếm chính xác số lượt xe vượt qua vạch cắt ngang đường theo hướng di chuyển và tính tốc độ xe/phút (Flow VPM).
-- **Đánh giá kẹt xe đa tiêu chí:** Không chỉ dựa vào số lượng xe (vì đường VN lúc nào cũng đông), hệ thống chỉ báo `HEAVY_CONGESTION` khi số lượng xe lớn kết hợp vận tốc trung bình dòng xe giảm mạnh (< 15 km/h).
-- **Bản đồ nhiệt (Traffic Density Heatmap):** Nhấn phím `H` khi xem preview để bật/tắt heatmap tích lũy điểm nghẽn.
-
-### Output tự động (`traffic_counter/outputs/`):
-- `<source_id>_traffic.jpg`: Ảnh chụp kèm Bounding Box, Track ID, vạch ảo Tripwire và HUD bảng điều khiển.
-- `<source_id>_traffic.json`: Dữ liệu phân tích gồm:
-  - `traffic_status`: `CLEAR` / `CROWDED` / `HEAVY_CONGESTION`
-  - `congestion_level`: Mức độ từ 1 đến 3
-  - `total_vehicles_present`: Tổng số xe đang có trong khung hình
-  - `vehicle_breakdown`: Chi tiết từng loại phương tiện (`motorcycle`, `car`, `bus`, `truck`, `bicycle`)
-  - `tripwire_counting`: `total_crossed` và `flow_vehicles_per_min`
-  - `average_speed_kmh`: Vận tốc trung bình của các xe đang di chuyển
-  - `is_jammed`: Boolean cảnh báo ùn tắc
-  - `has_water`: Boolean phát hiện mặt đường có nước (`true`/`false`, không đo độ sâu)
-  - `water_confidence`: Độ tin cậy phát hiện nước
-
-### Cách chạy:
+### 1. Phân đoạn đường trên ẢNH (Dùng Meta Mask2Former SOTA 68.7M Params):
 ```bash
-# Phân tích video hoặc ảnh camera
-python -m traffic_counter.main --source path/to/video.mp4 --preview
-
-# Chạy với ảnh tĩnh
-python -m traffic_counter.main --source path/to/image.jpg
+python -m road_segmentation.main --source data_test/sample_day.jpg --model mask2former --preview
 ```
-
 ---
 
 ## 3. Module 3: Flood Detector & Water Depth Estimation (`flood_detector/`)

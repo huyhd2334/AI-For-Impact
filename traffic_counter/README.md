@@ -20,6 +20,7 @@ traffic_counter/
 ├── analyzer.py             # Pipeline phân tích video/ảnh và xuất kết quả
 ├── generate_mock_video.py  # Script tạo video giả lập chạy thử
 ├── main.py                 # Điểm khởi chạy CLI
+├── weights/                # Chứa weights (vn_traffic_surveillance.pt)
 └── requirements.txt        # Thư viện phụ thuộc
 ```
 

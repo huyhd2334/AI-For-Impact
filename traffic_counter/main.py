@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 from .analyzer import VideoTrafficAnalyzer
 
 
@@ -23,6 +24,7 @@ def main():
         if os.path.exists(cand):
             default_model = cand
             break
+
     parser.add_argument("--model", type=str, default=default_model, help=f"Detection AI model weight path (default: {default_model})")
     parser.add_argument("--conf", type=float, default=0.18, help="Detection confidence threshold (default: 0.18)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference image resolution (default: 1280 for distant vehicles)")
@@ -34,6 +36,8 @@ def main():
     parser.add_argument("--mock", action="store_true", help="Generate and run on synthetic traffic video")
 
     args = parser.parse_args()
+
+    model_path = resolve_model_path(args.model)
 
     video_source = args.source
     if video_source and not os.path.exists(video_source):
@@ -51,7 +55,7 @@ def main():
     analyzer = VideoTrafficAnalyzer(
         camera_id=args.cam_id,
         sample_interval_sec=args.interval,
-        model_name=args.model,
+        model_name=model_path,
         confidence_thresh=args.conf,
         imgsz=args.imgsz,
         water_ratio_thresh=args.water_thresh,
