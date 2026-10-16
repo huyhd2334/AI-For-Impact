@@ -1,197 +1,439 @@
-# AI Road Intelligence & Traffic Surveillance
+# Hướng Dẫn Vận Hành & Khai Thác Hệ Thống (Quick Operation & I/O Guide)
 
-Hệ thống thị giác máy tính (Computer Vision) toàn diện phục vụ quản lý giao thông và giám sát an toàn đô thị Việt Nam, tối ưu hóa cho camera CCTV độ phân giải cao (lên đến 4K).
-
-Dự án được cấu trúc thành các module chuyên sâu và thư mục weights dùng chung:
-
-```
-AI_solution/
-├── weights/                   # Thư mục tập trung toàn bộ trọng số mô hình AI (*.pt, *.pth)
-│   ├── link_efficientb4_model.pth             # Phân đoạn mặt nước (72 MB)
-│   ├── video_seg_checkpoint_20200212-001734.pth # Phân đoạn video AFB-URR (397 MB)
-│   ├── level2_YouTubeVOS.pth                  # Base checkpoint YouTubeVOS (397 MB)
-│   ├── best.pth / twinlite_best.pth           # TwinLiteNet phân đoạn đường (1.8 MB)
-│   ├── vn_traffic_surveillance.pt             # YOLOv8 giao thông Việt Nam (44.8 MB)
-│   └── yolov8n.pt                             # YOLOv8 nano đa mục đích (6.5 MB)
-│
-├── road_segmentation/         # Module 1: Phân đoạn mặt đường & vỉa hè (Road Segmentation)
-│   ├── main.py                # Điểm khởi chạy pipeline phân đoạn
-│   ├── segmenter.py           # Bộ phân đoạn đa mô hình (Mask2Former, SegFormer, TwinLiteNet)
-│   ├── model.py               # Kiến trúc mạng TwinLiteNet (Realtime)
-│   ├── outputs/               # Kết quả xuất tự động: ảnh segmentation + file .json
-│   └── requirements.txt
-│
-├── traffic_counter/           # Module 2: Nhận diện, đếm xe & đánh giá ùn tắc (Traffic Counter)
-│   ├── main.py                # Điểm khởi chạy phân tích camera giao thông
-│   ├── analyzer.py            # Quản lý luồng video, tính toán vận tốc & kết luận kẹt xe
-│   ├── vehicle_counter.py     # YOLOv8 Tracking, vạch ảo Tripwire & Density Heatmap
-│   ├── water_detector.py      # Phát hiện mặt đường ướt / đọng nước ngập
-│   ├── schemas.py             # Schema chuẩn hóa dữ liệu
-│   ├── outputs/               # Kết quả xuất tự động: ảnh snapshot + file .json
-│   └── requirements.txt
-│
-├── flood_detector/            # Module 3: Phân đoạn vùng ngập & ước lượng độ sâu ngập (Flood Detector)
-│   ├── main.py                # Điểm khởi chạy CLI
-│   ├── inference.py           # Pipeline phân đoạn nước (LinkNet EfficientNet-B4) & tính độ sâu
-│   ├── outputs/               # Kết quả xuất tự động: ảnh mask, ảnh overlay + file .json
-│   └── requirements.txt
-│
-├── flood_reasoning.py         # Pipeline suy luận mức độ ngập kết hợp kết quả từ 2 module
-├── road_flood_analyzer.py     # Module giao thoa Road & Flood trực tiếp
-└── .gitignore                 # Bỏ qua weights lớn (*.pt, *.pth), video test (*.mp4), cache
-```
+Tài liệu này tập trung hướng dẫn **Cách Chạy (Execution)**, **Cách Cung Cấp Đầu Vào (Input)**, **Vị Trí Lưu Kết Quả (Output Storage)** và **Định Dạng Dữ Liệu Chi Tiết (Output Formats & Schemas)** cho toàn bộ các module trong hệ thống.
 
 ---
 
-## Cài đặt Weights Pretrained
+## 📌 Bảng Tra Cứu Nhanh Các Module
 
-Tải các file weights từ mục [GitHub Releases](https://github.com/huyhd2334/AI-For-Impact/releases) và đặt vào đúng vị trí:
-
-1. **`traffic_counter/weights/vn_traffic_surveillance.pt`** (44.8 MB, YOLOv8 Medium huấn luyện riêng cho giao thông VN).
-2. **`road_segmentation/weights/best.pth`** (1.8 MB, TwinLiteNet cho chế độ realtime).
-3. *(Riêng Mask2Former SOTA sẽ tự động tải từ Hugging Face trong lần chạy đầu tiên, không cần nạp thủ công).*
+| Tác vụ / Module | Lệnh Chạy Cốt Lõi | Dữ Liệu Input | Thư Mục Lưu Output | Định Dạng Output Xuất Ra |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Phân đoạn mặt đường**<br>`road_segmentation` | `python -m road_segmentation.main --source <input>` | Ảnh (`.jpg`, `.png`)<br>hoặc Video (`.mp4`) | `road_segmentation/outputs/` | • `*_segmented.jpg`<br>• `*_road_mask.png`<br>• `*_segmentation.json` |
+| **2. Đếm xe & Đo kẹt xe**<br>`traffic_counter` | `python -m traffic_counter.main --source <input>` | Video (`.mp4`), Ảnh,<br>hoặc Luồng `rtsp://` | • `traffic_counter/outputs/`<br>• `events_outbox/`<br>• `evidence_captures/` | • `*_traffic.jpg`<br>• `*_traffic.json`<br>• `incident_*.json` / `telemetry_*.json`<br>• `evidence_*.jpg` |
+| **3. Phân đoạn nước & Đo độ sâu**<br>`flood_detector` | `python -m flood_detector.main --image <input>` | Ảnh chụp cảnh ngập (`.jpg`, `.png`) | `flood_detector/outputs/` | • `*_water_mask.png`<br>• `*_water_overlay.jpg`<br>• `*_flood_result.json` |
+| **4. Suy luận mức độ ngập đường**<br>`flood_reasoning.py` | `python flood_reasoning.py --image <input> --auto-run-road` | Ảnh chụp đường phố (`.jpg`, `.png`) | `outputs/` | • `*_flood_mask.png`<br>• `*_flooded_road_mask.png`<br>• `*_flood_reasoning_overlay.jpg`<br>• `*_flood_reasoning.json` |
 
 ---
 
-## 4 Lệnh Chạy Mạnh Nhất (Strongest Recommended Commands)
+## 0. Chuẩn Bị Trọng Số (Weights)
 
-### 1. Phân đoạn đường trên ẢNH (Dùng Meta Mask2Former SOTA 68.7M Params):
+Trước khi chạy, đảm bảo các file weights đã nằm trong thư mục `weights/` tại thư mục gốc:
+
+```
+weights/
+├── vn_traffic_surveillance.pt        # YOLOv8 đếm xe giao thông VN (44.8 MB)
+├── link_efficientb4_model.pth        # Phân đoạn mặt nước (72.3 MB)
+├── best.pth                          # TwinLiteNet phân đoạn đường siêu nhẹ (1.8 MB)
+└── yolov8n.pt                        # YOLOv8 nano dự phòng (6.5 MB)
+```
+*(Riêng mô hình **Meta Mask2Former** và **SegFormer** sẽ tự động tải từ Hugging Face Hub khi chạy lần đầu).*
+
+---
+
+## 1. Phân Đoạn Mặt Đường & Vỉa Hè (`road_segmentation`)
+
+Module xác định phạm vi lòng đường xe chạy được (**Drivable Area**) và vỉa hè (**Sidewalk**), trích xuất tọa độ đa giác và mặt nạ nhị phân.
+
+### 1.1. Cách chạy (Command)
+
 ```bash
-python -m road_segmentation.main --source data_test/sample_day.jpg --model mask2former --preview
+# [Khuyến nghị] Chạy trên ẢNH dùng Meta Mask2Former SOTA (độ chính xác cao nhất)
+python -m road_segmentation.main --source images/no_3.png --model mask2former --preview
+
+# Chạy trên VIDEO dùng SegFormer-B2 (cân bằng chất lượng & tốc độ 35-45 FPS)
+python -m road_segmentation.main --source data_test/day_1.mp4 --model b2 --preview
+
+# Chạy với mô hình siêu nhẹ TwinLiteNet (cho máy yếu / Raspberry Pi / Jetson)
+python -m road_segmentation.main --source images/no_1.png --model twinlite --preview
 ```
+
+**Bảng tham số CLI:**
+- `--source` hoặc `--image`: Đường dẫn file ảnh (`.jpg`, `.png`) hoặc video (`.mp4`). Tự động quét trong thư mục hiện tại hoặc `data_test/`.
+- `--model`: Lựa chọn mô hình AI:
+  - `mask2former` (Mặc định cho ảnh, chính xác nhất).
+  - `b2` (SegFormer-B2, tối ưu cho video CCTV).
+  - `b0` (SegFormer-B0, siêu nhẹ 70-85 FPS).
+  - `twinlite` (TwinLiteNet 1.8 MB).
+- `--preview`: Mở cửa sổ trực tiếp để xem kết quả.
+- `--out-dir`: Thư mục lưu kết quả (Mặc định: `road_segmentation/outputs`).
+- `--alpha`: Độ trong suốt của lớp màu phủ lên đường (Mặc định: `0.38`).
+
 ---
 
-## 3. Module 3: Flood Detector & Water Depth Estimation (`flood_detector/`)
+### 1.2. Cách input
+- **Định dạng file:** 
+  - Ảnh: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`.
+  - Video: `.mp4`, `.avi`, `.mkv`, `.mov`.
+- **Ví dụ đường dẫn:** `--source images/no_1.png` hoặc `--source D:/data/camera_01.mp4`.
 
-Phân đoạn mặt nước ngập lụt đô thị và ước lượng mức độ sâu ngập (cm) từ một bức ảnh đơn lẻ.
+---
 
-### Tính năng chính:
-- **Phân đoạn nước bằng Deep Learning:** Tích hợp mô hình LinkNet với backbone EfficientNet-B4 chuyên dụng cho vùng nước ngập.
-- **Ước lượng độ sâu ngập đa phương pháp (Hierarchical Depth Estimation):**
-  - **Mốc người lội nước (Anthropometric Submersion):** Đo mức độ ngập của cơ thể người (mắt cá chân, đầu gối, ngang hông, ngực) dựa trên tỷ lệ giải phẫu học chuẩn.
-  - **Mốc phương tiện (Automotive Submersion):** Đo mức độ ngập của bánh xe, khoảng sáng gầm xe và thân ô tô con, xe tải, xe máy.
-  - **Mô hình bao phủ không gian (Inundation Coverage):** Đo lường diện tích và tỷ lệ ngập nước trên toàn khung hình khi không có vật thể tham chiếu.
-- **Phân cấp cảnh báo nguy cơ 5 mức:** Từ Mức 0 (khô ráo) đến Mức 4 (ngập nghiêm trọng > 70 cm), đưa ra khuyến nghị an toàn giao thông cho từng loại phương tiện.
+### 1.3. Output lưu ở đâu?
+Tất cả kết quả tự động xuất vào: **`road_segmentation/outputs/`**
+- Ảnh trực quan hóa: `<tên_file_gốc>_segmented.jpg`
+- Ảnh mặt nạ nhị phân: `<tên_file_gốc>_road_mask.png`
+- Tệp dữ liệu JSON: `<tên_file_gốc>_segmentation.json`
 
-### Output tự động (`flood_detector/outputs/`):
-- `<source_id>_water_mask.png`: Ảnh mask phân đoạn nhị phân (vùng nước ngập màu trắng 255, khô ráo màu đen 0).
-- `<source_id>_water_overlay.jpg`: Ảnh gốc được phủ mask màu xanh ngọc (cyan neon) trong suốt, viền ranh giới mặt nước và bảng HUD thông số độ sâu.
-- `<source_id>_flood_result.json`: Toàn bộ chỉ số định lượng:
-  - `water_detected`: `true` / `false`
-  - `water_area_percentage`: Tỷ lệ diện tích ngập (%)
-  - `estimated_depth_cm`: Độ sâu ước lượng trung bình (cm)
-  - `depth_range_cm`: Khoảng độ sâu dao động `[min, max]` (cm)
-  - `severity_level` & `severity_title`: Cấp độ ngập và tên mức độ
-  - `reference_source`: Mốc tham chiếu đo đạc (`PERSON_SUBMERSION` / `VEHICLE_SUBMERSION` / `INUNDATION_COVERAGE`)
-  - `safety_action`: Khuyến nghị an toàn giao thông
+---
 
-### Cách chạy:
+### 1.4. Định dạng Output chi tiết
+
+#### A. File ảnh Mask (`*_road_mask.png`):
+- Ảnh thang độ xám 1 kênh (Grayscale uint8), cùng độ phân giải với ảnh gốc.
+- **Giá trị pixel = 255 (Trắng):** Vùng lòng đường xe chạy.
+- **Giá trị pixel = 0 (Đen):** Vỉa hè, nền, công trình, bầu trời.
+
+#### B. File ảnh trực quan (`*_segmented.jpg`):
+- Lòng đường được phủ màu xanh lá neon trong suốt.
+- Vỉa hè được phủ màu tím hồng.
+
+#### C. File JSON số liệu (`*_segmentation.json`):
+```json
+{
+  "timestamp": "2026-10-16T11:45:00.123456",
+  "source": "no_3.png",
+  "model_used": "MASK2FORMER",
+  "image_size": [1280, 720],
+  "road_area_ratio": 0.4872,
+  "road_area_percentage": 48.72,
+  "sidewalk_area_ratio": 0.0835,
+  "sidewalk_area_percentage": 8.35,
+  "processing_time_ms": 320.5,
+  "total_road_polygons": 1,
+  "road_polygons": [
+    [
+      [120, 720],
+      [450, 310],
+      [780, 310],
+      [1150, 720]
+    ]
+  ]
+}
+```
+**Ý nghĩa các trường JSON:**
+- `road_area_percentage`: Tỷ lệ phần trăm diện tích lòng đường chiếm trong toàn khung hình (%).
+- `sidewalk_area_percentage`: Tỷ lệ vỉa hè chiếm trong khung hình (%).
+- `road_polygons`: Mảng danh sách các đỉnh tọa độ $[x, y]$ bao bọc lòng đường (phục vụ làm vùng ROI tĩnh cho các hệ thống giám sát khác).
+
+---
+
+## 2. Nhận Diện, Đếm Xe & Đánh Giá Ùn Tắc (`traffic_counter`)
+
+Module theo dõi xe cộ đa đối tượng (YOLOv8 + ByteTrack), đếm lưu lượng qua vạch ảo (**Virtual Tripwire**), tính vận tốc di chuyển (km/h) và phát hiện kẹt xe.
+
+### 2.1. Cách chạy (Command)
+
 ```bash
-# Chạy nhận diện và đo độ sâu từ 1 ảnh
-python -m flood_detector.main --image path/to/image.jpg
+# 1. Chạy trên ẢNH tĩnh (xuất snapshot HUD và JSON tức thì)
+python -m traffic_counter.main --source images/traffic_jams.jpg --preview
 
-# Xem trước ảnh overlay trực tiếp
-python -m flood_detector.main --image path/to/image.jpg --preview
+# 2. Chạy trên VIDEO camera giao thông kèm Bản đồ nhiệt (Heatmap)
+python -m traffic_counter.main --source data_test/traffic_sample.mp4 --preview --heatmap
+
+# 3. Chạy với luồng CAMERA TRỰC TIẾP (RTSP IP Camera)
+python -m traffic_counter.main --source rtsp://admin:12345@192.168.1.100:554/live --cam-id CAM_D1_01 --preview
+
+# 4. Bật SAHI Slicing cho camera 4K / góc siêu rộng (bắt xe nhỏ ở xa)
+python -m traffic_counter.main --source data_test/cctv_4k.mp4 --sahi --preview
+
+# 5. Chạy giả lập VIDEO TEST (tự tạo video xe chạy và vũng nước để test mà không cần dữ liệu)
+python -m traffic_counter.main --mock --preview
 ```
+
+*Phím tương tác khi đang mở màn hình xem trực tiếp (`--preview`):*
+- Bấm **`Q`** hoặc **`ESC`**: Thoát chương trình.
+- Bấm **`H`**: Bật / Tắt lớp phủ bản đồ nhiệt mật độ giao thông (Heatmap).
+
+**Bảng tham số CLI:**
+- `--source`: File video (`.mp4`), ảnh (`.jpg`), link RTSP stream (`rtsp://...`).
+- `--cam-id`: Tên định danh camera (Mặc định: `CAM_BINHTHANH_01`).
+- `--interval`: Chu kỳ xuất bản tin sự kiện JSON và ảnh chụp bằng chứng (Mặc định: `5.0` giây/lần).
+- `--conf`: Ngưỡng tin cậy nhận diện phương tiện (Mặc định: `0.18`).
+- `--jam-speed`: Ngưỡng vận tốc (km/h) dưới mức này thì xác định là kẹt xe (Mặc định: `15.0`).
+- `--tripwire-y`: Vị trí đặt vạch đếm ảo theo trục dọc (Mặc định: `0.58`, tương đương 58% chiều cao ảnh).
+- `--heatmap`: Bật tính năng tích lũy bản đồ nhiệt mật độ xe di chuyển.
+- `--sahi`: Bật chế độ chia nhỏ ảnh (tiling 768x768) nhận diện xe siêu nhỏ cho camera 4K.
 
 ---
 
-## 4. Pipeline Suy Luận Mức Độ Ngập Độc Lập (`flood_reasoning.py`)
+### 2.2. Cách input
+- **File video cục bộ:** `data_test/video.mp4`
+- **File ảnh chụp:** `images/traffic_jams.jpg`
+- **Luồng stream thời gian thực:** `rtsp://<user>:<pass>@<ip>:<port>/stream` hoặc webcam `0`.
 
-Kiến trúc tách rời module (Decoupled Flood Reasoning Engine) được thiết kế nhằm tối ưu hiệu năng tính toán bằng cách phân tách công đoạn nhận diện mặt đường và công đoạn phân đoạn ngập lụt thành 2 bước độc lập.
+---
 
-### 4.1. Công dụng chính:
-- **Tận dụng kết quả phân đoạn đường có sẵn:** Nhận diện và nạp Road Mask từ output của module `road_segmentation` (hỗ trợ cả ảnh nhị phân `<source_id>_road_mask.png` lẫn tự động tái tạo đa giác từ `<source_id>_segmentation.json`) mà không cần suy luận lại mặt đường.
-- **Phân đoạn vùng nước ngập chuyên sâu:** Ứng dụng mô hình LinkNet với backbone EfficientNet-B4 đã huấn luyện riêng cho bối cảnh ngập lụt, kết hợp kỹ thuật lọc vùng liên thông (Connected Components) và đóng hình thái học (Morphological Closing) để loại bỏ nhiễu nước giả.
-- **Tính toán giao thoa không gian ($M_{road} \cap M_{water}$):** Phân biệt chính xác giữa nước ngập trên lòng đường (gây nguy hiểm giao thông) và nước đọng ngoài lề đường, ao hồ, rãnh thoát nước.
-- **Hiệu chỉnh thông minh trong tình huống ngập sâu (Edge Cases):** Khi nước ngập trắng xóa lòng đường khiến mô hình phân đoạn đường chỉ nhận diện được một phần viền lề hoặc bị mất dấu, hệ thống tự động bù trừ tỷ lệ ngập hiệu dụng (`effective_flood_ratio`) để đảm bảo không bỏ sót nguy cơ ngập nghiêm trọng.
-- **Phân loại và kết luận 3 cấp độ ngập chuẩn:**
-  - 🟢 **Mức 0 ("Không có"):** Tỷ lệ lòng đường bị ngập $< 5\%$ (hoặc diện tích nước toàn cảnh $< 1.5\%$). Mặt đường khô ráo, các phương tiện lưu thông an toàn.
-  - 🟡 **Mức 1 ("Có ít"):** Tỷ lệ lòng đường bị ngập từ $5\%$ đến $50\%$. Nước ngập một phần mặt đường, các phương tiện cần chú ý giảm tốc độ.
-  - 🔴 **Mức 2 ("Ngập toàn bộ"):** Tỷ lệ lòng đường bị ngập $\ge 50\%$. Toàn bộ hoặc phần lớn lòng đường ngập sâu, nguy cơ chết máy và sự cố rất cao.
+### 2.3. Output lưu ở đâu?
 
-### 4.2. Output tự động xuất ra (`outputs/`):
-- `<source_id>_flood_mask.png`: Ảnh mask nhị phân thể hiện toàn bộ diện tích mặt nước trong khung hình.
-- `<source_id>_flooded_road_mask.png`: Ảnh mask nhị phân chỉ riêng phần nước ngập nằm trên lòng đường.
-- `<source_id>_flood_reasoning_overlay.jpg`: Ảnh trực quan hóa đa màu:
-  - Vùng đường khô ráo: Phủ màu xanh lá.
-  - Nước ngoài phạm vi đường: Phủ màu xanh dương.
-  - Nước ngập trên lòng đường: Phủ màu đỏ cam viền vàng neon nổi bật.
-  - Bảng điều khiển HUD trên góc ảnh hiển thị cấp độ ngập, tỷ lệ phần trăm và chú thích màu sắc.
-- `<source_id>_flood_reasoning.json`: File dữ liệu tổng hợp phục vụ tích hợp hệ thống backend/dashboard:
-  ```json
-  {
-    "image_source": "1.jpg",
-    "resolution": [739, 415],
-    "flood_level": "Ngập toàn bộ",
-    "level_code": 2,
-    "flooded_road_percentage": 91.08,
-    "road_segment_source": "road_segmentation/outputs/1_segmentation.json",
-    "road_area_percentage": 52.19,
-    "water_area_percentage": 54.49,
-    "description": "Ngập toàn bộ: Toàn bộ hoặc phần lớn mặt đường bị ngập sâu (91.1% lòng đường). Nguy cơ chết máy rất cao.",
-    "processing_time_ms": 462.9,
-    "outputs": {
-      "flood_mask": "outputs/1_flood_mask.png",
-      "flooded_road_mask": "outputs/1_flooded_road_mask.png",
-      "reasoning_overlay": "outputs/1_flood_reasoning_overlay.jpg",
-      "reasoning_json": "outputs/1_flood_reasoning.json"
-    }
+Hệ thống ghi kết quả tự động vào 3 thư mục:
+
+1. **`traffic_counter/outputs/`**: Lưu kết quả phân tích định kỳ hoặc khi chạy ảnh đơn:
+   - `<source_id>_traffic.jpg`: Ảnh chụp kèm khung bounding box xe, vạch ảo, vận tốc và thông số HUD.
+   - `<source_id>_traffic.json`: File JSON kết quả tổng hợp.
+2. **`events_outbox/`**: Hộp thư chứa các gói tin sự kiện thời gian thực (Event Telemetry & Incidents):
+   - `telemetry_<cam_id>_<uuid>.json`: Phát sinh định kỳ mỗi `--interval` giây khi giao thông bình thường.
+   - `incident_<cam_id>_<uuid>.json`: Phát sinh ngay lập tức khi phát hiện **Ùn tắc giao thông** (`TRAFFIC_JAM`) hoặc **Mặt đường đọng nước** (`WATER_DETECTED`).
+3. **`evidence_captures/`**: Lưu ảnh chụp bằng chứng độ nét cao tại thời điểm xảy ra sự cố (`evidence_<cam_id>_<uuid>.jpg`).
+
+---
+
+### 2.4. Định dạng Output chi tiết
+
+#### File JSON Sự kiện Giao thông (`events_outbox/*.json` & `outputs/*_traffic.json`):
+```json
+{
+  "event_id": "c1f9b763-92b1-4f16-8bc5-3e284db6183a",
+  "timestamp": "2026-10-16T12:00:05.123456Z",
+  "source_type": "camera_stream",
+  "camera_id": "CAM_BINHTHANH_01",
+  "location": {
+    "latitude": 10.7769,
+    "longitude": 106.7009
+  },
+  "vehicle_count": 46,
+  "vehicle_breakdown": {
+    "motorcycle": 41,
+    "car": 4,
+    "bus": 0,
+    "truck": 0,
+    "bicycle": 1
+  },
+  "is_congested": true,
+  "avg_speed_kmh": 8.5,
+  "total_crossed_tripwire": 128,
+  "flow_vehicles_per_min": 54.2,
+  "has_water": false,
+  "water_confidence": 0.0,
+  "alert_type": "TRAFFIC_JAM",
+  "alert_level": "WARNING",
+  "evidence_frame_path": "evidence_captures/evidence_CAM_BINHTHANH_01_c1f9b763.jpg",
+  "message": "Giao thông: Ùn tắc nghiêm trọng! Vận tốc trung bình 8.5 km/h (< 15 km/h)."
+}
+```
+
+**Ý nghĩa các trường JSON:**
+- `vehicle_count`: Tổng số lượng phương tiện đang có mặt trong khung hình.
+- `vehicle_breakdown`: Phân loại chi tiết số lượng từng loại xe: `motorcycle` (xe máy), `car` (ô tô), `truck` (xe tải), `bus` (xe buýt), `bicycle` (xe đạp).
+- `is_congested`: `true` nếu giao thông bị kẹt xe thực sự (mật độ đông $\ge$ 10 xe và vận tốc trung bình $< 15\text{ km/h}$).
+- `avg_speed_kmh`: Vận tốc trung bình di chuyển của toàn bộ luồng xe (km/h).
+- `total_crossed_tripwire`: Tổng số xe đã đi cắt qua vạch ảo từ đầu phiên chạy.
+- `flow_vehicles_per_min`: Lưu lượng thông hành (số xe lướt qua vạch mỗi phút - Flow VPM).
+- `has_water`: `true` nếu phát hiện vũng nước / mặt đường trơn ướt phản quang.
+- `alert_level`: Mức cảnh báo: `"INFO"` (bình thường), `"WARNING"` (ùn tắc/nước đọng), `"CRITICAL"` (ngập sâu và tê liệt).
+
+---
+
+## 3. Phân Đoạn Nước & Đo Độ Sâu Ngập (`flood_detector`)
+
+Module ứng dụng mạng Deep Learning LinkNet (EfficientNet-B4) bóc tách toàn bộ diện tích ngập nước và ước lượng độ sâu ngập (cm) dựa trên mốc vật thể ngập nước.
+
+### 3.1. Cách chạy (Command)
+
+```bash
+# Chạy nhận diện ngập và ước lượng độ sâu từ 1 ảnh
+python -m flood_detector.main --image images/high_1.png
+
+# Xem trước ảnh overlay trực tiếp trên màn hình
+python -m flood_detector.main --image images/high_1.png --preview
+
+# Chỉ định thư mục lưu kết quả tùy ý
+python -m flood_detector.main --image images/low_1.png --out-dir my_custom_folder/ --preview
+```
+
+**Bảng tham số CLI:**
+- `--image` hoặc `--source`: *(Bắt buộc)* Đường dẫn tới ảnh cần phân tích (`.jpg`, `.png`).
+- `--model-path`: Đường dẫn file weights LinkNet (Mặc định tự tìm trong `weights/link_efficientb4_model.pth`).
+- `--out-dir`: Thư mục lưu kết quả (Mặc định: `flood_detector/outputs`).
+- `--preview`: Mở giao diện xem trực tiếp.
+
+---
+
+### 3.2. Cách input
+- **Định dạng file:** Ảnh tĩnh `.jpg`, `.png`, `.jpeg`.
+- **Ví dụ đường dẫn:** `--image images/high_1.png` hoặc `--image D:/floods/quan8_ngap.jpg`.
+
+---
+
+### 3.3. Output lưu ở đâu?
+Tất cả kết quả tự động xuất vào: **`flood_detector/outputs/`**
+- Ảnh mask nước nhị phân: `<source_id>_water_mask.png`
+- Ảnh overlay HUD trực quan: `<source_id>_water_overlay.jpg`
+- Tệp JSON chỉ số ngập và độ sâu: `<source_id>_flood_result.json`
+
+---
+
+### 3.4. Định dạng Output chi tiết
+
+#### A. File ảnh Mask nước (`*_water_mask.png`):
+- Ảnh thang xám 1 kênh (Grayscale uint8):
+  - **Giá trị 255 (Trắng):** Vùng có mặt nước ngập.
+  - **Giá trị 0 (Đen):** Vùng cạn / khô ráo.
+
+#### B. File ảnh trực quan HUD (`*_water_overlay.jpg`):
+- Mặt nước ngập được phủ lớp màu xanh ngọc (Cyan neon) bán trong suốt.
+- Đường bao viền ranh giới mặt nước màu vàng/xanh neon.
+- Bảng thông số HUD trên góc ảnh hiển thị cấp độ ngập, độ sâu ước lượng (cm) và khuyến nghị an toàn.
+
+#### C. File JSON kết quả (`*_flood_result.json`):
+```json
+{
+  "image_source": "high_1.png",
+  "resolution": [1280, 720],
+  "water_detected": true,
+  "water_area_ratio": 0.3462,
+  "water_area_percentage": 34.62,
+  "estimated_depth_cm": 42.5,
+  "depth_range_cm": [35.0, 70.0],
+  "severity_level": "LEVEL_3_DEEP",
+  "severity_code": 3,
+  "severity_title": "Mức 3: Ngập sâu (Quá ống xả / Ngập bánh xe ô tô)",
+  "safety_action": "Xe máy tê liệt hoàn toàn, nguy cơ thủy kích ô tô rất cao. Cấm ô tô con và xe máy qua lại.",
+  "reference_source": "VEHICLE_SUBMERSION",
+  "submersion_analysis": "Phat hien 2 phuong tien bi ngap tren 50% banh xe.",
+  "processing_time_ms": 185.4,
+  "output_mask_path": "flood_detector/outputs/high_1_water_mask.png",
+  "output_overlay_path": "flood_detector/outputs/high_1_water_overlay.jpg",
+  "output_json_path": "flood_detector/outputs/high_1_flood_result.json"
+}
+```
+
+**Thang 5 cấp độ cảnh báo ngập (`severity_code`):**
+- **0 - LEVEL_0_DRY** ($0 - 5\text{ cm}$): Khô ráo, lưu thông an toàn.
+- **1 - LEVEL_1_SHALLOW** ($5 - 15\text{ cm}$): Nước xâm xấp mắt cá chân. Xe máy giảm tốc độ.
+- **2 - LEVEL_2_MODERATE** ($15 - 35\text{ cm}$): Ngập nửa bánh xe máy, chạm gầm ô tô. Ô tô gầm thấp hạn chế đi.
+- **3 - LEVEL_3_DEEP** ($35 - 70\text{ cm}$): Vượt ống xả xe máy, ngập bánh ô tô con. Cấm xe máy và ô tô con.
+- **4 - LEVEL_4_CRITICAL** ($> 70\text{ cm}$): Ngập nắp capo, ngang hông người. Cần cứu hộ khẩn cấp.
+
+---
+
+## 4. Pipeline Suy Luận Mức Độ Ngập Mặt Đường (`flood_reasoning.py`)
+
+Đây là **Engine suy luận tích hợp mạnh nhất**: Kết hợp Road Mask từ Module 1 và Water Mask từ Module 3 để tính diện tích giao thoa lòng đường bị ngập ($M_{road} \cap M_{water}$), phân loại thành 3 mức ngập chuẩn phục vụ cảnh báo giao thông đô thị.
+
+### 4.1. Cách chạy (Command)
+
+#### Cách 1: [Tiện lợi nhất] Tự động trọn gói 1 lệnh (`--auto-run-road`)
+Nếu ảnh chưa từng chạy qua phân đoạn đường, lệnh này sẽ tự động gọi `road_segmentation` trước rồi tự động tính toán suy luận ngập ngay sau đó:
+```bash
+python flood_reasoning.py --image images/high_2.png --auto-run-road --preview
+```
+
+#### Cách 2: Quy trình 2 bước tiêu chuẩn (Tối ưu cho camera CCTV cố định)
+Đối với camera cố định, mặt đường chỉ cần phân đoạn 1 lần duy nhất:
+```bash
+# Bước 1: Tạo Road Mask cho góc camera đó (chỉ chạy 1 lần)
+python -m road_segmentation.main --source images/high_2.png
+
+# Bước 2: Chạy suy luận ngập (tự động nhận diện output của Bước 1)
+python flood_reasoning.py --image images/high_2.png --preview
+```
+
+#### Cách 3: Nạp file Road Mask hoặc file JSON đa giác tùy chọn
+```bash
+# Nạp file Mask PNG có sẵn
+python flood_reasoning.py --image images/no_1.png --road-output road_segmentation/outputs/no_1_road_mask.png
+
+# Nạp file JSON đa giác có sẵn
+python flood_reasoning.py --image images/no_1.png --road-output road_segmentation/outputs/no_1_segmentation.json
+```
+
+**Bảng tham số CLI:**
+- `--image` hoặc `--source`: *(Bắt buộc)* Đường dẫn ảnh cần phân tích (`.jpg`, `.png`).
+- `--road-output`: Đường dẫn tới file mask `.png` hoặc file `.json` của mặt đường đã phân đoạn từ trước.
+- `--auto-run-road`: Cờ tự động kích hoạt Module `road_segmentation` nếu chưa tìm thấy kết quả của ảnh này.
+- `--out-dir`: Thư mục lưu kết quả suy luận (Mặc định: `outputs/`).
+- `--thresh-minor`: Ngưỡng bắt đầu tính là "Có ít" (Mặc định: `0.05` = 5% lòng đường).
+- `--thresh-full`: Ngưỡng bắt đầu tính là "Ngập toàn bộ" (Mặc định: `0.50` = 50% lòng đường).
+- `--preview`: Mở cửa sổ trực tiếp xem ảnh overlay kết quả.
+
+---
+
+### 4.2. Cách input
+- File ảnh đường phố: `.jpg`, `.png`.
+- Tùy chọn nạp kèm file `*_road_mask.png` hoặc `*_segmentation.json`.
+
+---
+
+### 4.3. Output lưu ở đâu?
+Tất cả kết quả lưu tại thư mục gốc: **`outputs/`**
+- Mask toàn bộ nước trong khung hình: `outputs/<source_id>_flood_mask.png`
+- Mask chỉ riêng phần nước ngập trên lòng đường: `outputs/<source_id>_flooded_road_mask.png`
+- Ảnh trực quan hóa 3 vùng màu: `outputs/<source_id>_flood_reasoning_overlay.jpg`
+- Báo cáo tổng hợp JSON: `outputs/<source_id>_flood_reasoning.json`
+
+---
+
+### 4.4. Định dạng Output chi tiết
+
+#### A. File ảnh Mask giao thoa (`outputs/*_flooded_road_mask.png`):
+- Mask nhị phân biểu diễn $M_{road} \cap M_{water}$.
+- **Trắng (255):** Điểm nước ngập nằm trực tiếp trên mặt đường gây nguy cơ cho xe cộ.
+- **Đen (0):** Phần đường khô ráo hoặc nước nằm ngoài lề đường (ao hồ, mương rãnh).
+
+#### B. File ảnh trực quan 3 vùng màu (`outputs/*_flood_reasoning_overlay.jpg`):
+- 🟢 **Màu xanh lá:** Lòng đường khô ráo, an toàn di chuyển.
+- 🔵 **Màu xanh dương:** Nước nằm ngoài phạm vi đường (hồ nước, rãnh xả, cây cỏ ven đường).
+- 🔴 **Màu đỏ cam viền vàng neon:** Vùng nước ngập trực tiếp trên lòng đường.
+- ⬛ **Bảng điều khiển HUD:** Thể hiện cấp độ ngập, tỷ lệ % ngập và chú thích màu sắc.
+
+#### C. File JSON tổng hợp (`outputs/*_flood_reasoning.json`):
+```json
+{
+  "image_source": "high_2.png",
+  "resolution": [1280, 720],
+  "flood_level": "Ngập toàn bộ",
+  "level_code": 2,
+  "flooded_road_percentage": 91.08,
+  "road_segment_source": "road_segmentation/outputs/high_2_segmentation.json",
+  "road_area_percentage": 52.19,
+  "water_area_percentage": 54.49,
+  "description": "Ngập toàn bộ: Toàn bộ hoặc phần lớn mặt đường bị ngập sâu (91.1% lòng đường). Nguy cơ chết máy rất cao.",
+  "processing_time_ms": 462.9,
+  "outputs": {
+    "flood_mask": "outputs/high_2_flood_mask.png",
+    "flooded_road_mask": "outputs/high_2_flooded_road_mask.png",
+    "reasoning_overlay": "outputs/high_2_flood_reasoning_overlay.jpg",
+    "reasoning_json": "outputs/high_2_flood_reasoning.json"
   }
-  ```
-
-### 4.3. Bảng tham số dòng lệnh (CLI Arguments):
-| Tham số | Kiểu | Mặc định | Ý nghĩa & Mô tả |
-| :--- | :---: | :---: | :--- |
-| `--image` / `--source` | `str` | *(Bắt buộc)* | Đường dẫn file ảnh đầu vào (`.jpg`, `.png`,...) |
-| `--road-output` | `str` | `None` | Đường dẫn trực tiếp file mask (`.png`) hoặc file json (`.json`) từ `road_segmentation` |
-| `--auto-run-road` | `flag` | `False` | Tự động gọi module `road_segmentation` nếu chưa có sẵn output cho ảnh này |
-| `--out-dir` | `str` | `"outputs"` | Thư mục lưu kết quả các file mask, overlay và json |
-| `--thresh-minor` | `float` | `0.05` | Ngưỡng ngập xác định mức "Có ít" (0.05 tương đương 5%) |
-| `--thresh-full` | `float` | `0.50` | Ngưỡng ngập xác định mức "Ngập toàn bộ" (0.50 tương đương 50%) |
-| `--preview` | `flag` | `False` | Mở cửa sổ GUI xem trực tiếp ảnh overlay kết quả sau khi suy luận |
-
-### 4.4. Hướng dẫn sử dụng:
-
-#### Cách 1: Quy trình 2 bước tiêu chuẩn (Khuyến nghị cho pipeline batch)
-```bash
-# Bước 1: Chạy phân đoạn mặt đường (chỉ chạy 1 lần)
-python -m road_segmentation.main --image data/demo.jpg
-
-# Bước 2: Chạy suy luận ngập lụt (tự động khớp output của bước 1)
-python flood_reasoning.py --image data/demo.jpg --preview
+}
 ```
 
-#### Cách 2: Tự động chạy trọn gói 1 lệnh (End-to-End tự động)
-Nếu ảnh chưa từng qua phân đoạn đường, thêm cờ `--auto-run-road` để engine tự động gọi `road_segmentation`:
-```bash
-python flood_reasoning.py --image data/demo.jpg --auto-run-road --preview
+**Quy chuẩn 3 mức độ ngập (`level_code`):**
+- 🟢 **0 - "Không có":** Tỷ lệ lòng đường bị ngập $< 5\%$. Đường khô ráo, các phương tiện lưu thông an toàn.
+- 🟡 **1 - "Có ít":** Tỷ lệ lòng đường bị ngập từ $5\%$ đến $50\%$. Nước ngập một phần mặt đường, các xe cần chú ý giảm tốc tránh trơn trượt hoặc nước vào bô.
+- 🔴 **2 - "Ngập toàn bộ":** Tỷ lệ lòng đường bị ngập $\ge 50\%$. Phần lớn hoặc toàn bộ lòng đường ngập sâu, nguy cơ chết máy hoặc sự cố rất cao.
+
+---
+
+## 5. Bảng Tổng Hợp Vị Trí File Output Toàn Dự Án
+
 ```
-
-#### Cách 3: Chỉ định đường dẫn Road Mask tùy ý
-Khi bạn có sẵn file mask ảnh hoặc file JSON phân đoạn đường ở vị trí bất kỳ:
-```bash
-# Với file mask ảnh PNG
-python flood_reasoning.py --image data/demo.jpg --road-output path/to/custom_road_mask.png
-
-# Với file JSON đa giác
-python flood_reasoning.py --image data/demo.jpg --road-output path/to/custom_segmentation.json
-```
-
-#### Cách 4: Tích hợp vào mã nguồn Python
-```python
-from flood_reasoning import FloodReasoningEngine
-
-# Khởi tạo engine (tự động nạp model lên CUDA nếu khả dụng)
-engine = FloodReasoningEngine()
-
-# Thực hiện suy luận
-result, overlay_img = engine.reason(
-    image_path="data/demo.jpg",
-    auto_run_road=True,
-    out_dir="outputs"
-)
-
-print(f"Mức độ ngập: {result['flood_level']} ({result['flooded_road_percentage']}%)")
-print(f"Đánh giá: {result['description']}")
+AI-For-Impact/
+│
+├── road_segmentation/outputs/
+│   ├── <id>_segmented.jpg                   # Ảnh trực quan lòng đường & vỉa hè
+│   ├── <id>_road_mask.png                   # Mặt nạ nhị phân lòng đường
+│   └── <id>_segmentation.json               # JSON tọa độ polygon & diện tích đường
+│
+├── traffic_counter/outputs/
+│   ├── <id>_traffic.jpg                     # Snapshot xe, bounding box & HUD
+│   └── <id>_traffic.json                    # JSON đếm xe, vận tốc & kẹt xe
+│
+├── events_outbox/
+│   ├── telemetry_<cam_id>_<event_id>.json   # Bản tin định kỳ bình thường
+│   └── incident_<cam_id>_<event_id>.json    # Bản tin sự cố kẹt xe / mặt đường có nước
+│
+├── evidence_captures/
+│   └── evidence_<cam_id>_<event_id>.jpg     # Ảnh bằng chứng khi xảy ra sự cố
+│
+├── flood_detector/outputs/
+│   ├── <id>_water_mask.png                  # Mặt nạ nhị phân mặt nước ngập
+│   ├── <id>_water_overlay.jpg               # Ảnh overlay neon & HUD độ sâu
+│   └── <id>_flood_result.json               # JSON độ sâu (cm) & 5 cấp độ ngập
+│
+└── outputs/
+    ├── <id>_flood_mask.png                  # Toàn bộ mặt nước trong ảnh
+    ├── <id>_flooded_road_mask.png           # Chỉ riêng nước ngập trên lòng đường
+    ├── <id>_flood_reasoning_overlay.jpg     # Ảnh trực quan 3 màu (Đường khô, Nước ngoài, Nước ngập)
+    └── <id>_flood_reasoning.json            # JSON kết luận mức ngập (Không có / Có ít / Ngập toàn bộ)
 ```
