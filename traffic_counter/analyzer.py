@@ -283,7 +283,7 @@ class VideoTrafficAnalyzer:
                 vehicle_count=total_vehicles,
                 vehicle_breakdown=breakdown,
                 is_congested=is_jammed,
-                avg_speed_kmh=avg_speed_kmh if has_speed else None,
+                avg_speed_kmh=avg_speed_kmh if has_speed_data else None,
                 total_crossed_tripwire=total_crossed,
                 flow_vehicles_per_min=flow_vpm,
                 has_water=has_water,
