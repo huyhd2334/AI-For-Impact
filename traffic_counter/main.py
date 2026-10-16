@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 from .analyzer import VideoTrafficAnalyzer
 
 
@@ -10,7 +11,29 @@ def main():
     parser.add_argument("--interval", type=float, default=5.0, help="Snapshot and event emission interval in seconds (default: 5.0s)")
     parser.add_argument("--preview", action="store_true", help="Display visual live preview window")
     parser.add_argument("--fps", type=float, default=10.0, help="Target processing/display FPS (default: 10.0)")
-    default_model = "vn_traffic_surveillance.pt" if os.path.exists("vn_traffic_surveillance.pt") else ("rtdetr-x.pt" if os.path.exists("rtdetr-x.pt") else "yolov8s.pt")
+    curr_dir = Path(__file__).resolve().parent
+
+    def resolve_model_path(name: str) -> str:
+        candidates = [
+            Path(name),
+            curr_dir / "weights" / name,
+            Path("traffic_counter/weights") / name,
+            Path("weights") / name,
+            Path(f"traffic_counter/weights/{name}"),
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return name
+
+    default_model = resolve_model_path("vn_traffic_surveillance.pt")
+    if not os.path.exists(default_model):
+        for fallback in ["rtdetr-x.pt", "yolov8s.pt", "yolov8n.pt"]:
+            fb_path = resolve_model_path(fallback)
+            if os.path.exists(fb_path):
+                default_model = fb_path
+                break
+
     parser.add_argument("--model", type=str, default=default_model, help=f"Detection AI model weight path (default: {default_model})")
     parser.add_argument("--conf", type=float, default=0.18, help="Detection confidence threshold (default: 0.18)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference image resolution (default: 1280 for distant vehicles)")
@@ -22,6 +45,8 @@ def main():
     parser.add_argument("--mock", action="store_true", help="Generate and run on synthetic traffic video")
 
     args = parser.parse_args()
+
+    model_path = resolve_model_path(args.model)
 
     video_source = args.source
     if video_source and not os.path.exists(video_source):
@@ -39,7 +64,7 @@ def main():
     analyzer = VideoTrafficAnalyzer(
         camera_id=args.cam_id,
         sample_interval_sec=args.interval,
-        model_name=args.model,
+        model_name=model_path,
         confidence_thresh=args.conf,
         imgsz=args.imgsz,
         water_ratio_thresh=args.water_thresh,

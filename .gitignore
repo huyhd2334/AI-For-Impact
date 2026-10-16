@@ -45,7 +45,7 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Heavy Deep Learning Model Weights & Checkpoints
+# Heavy Deep Learning Model Weights & Checkpoints (Binary files)
 *.pt
 *.pth
 *.onnx
@@ -53,7 +53,6 @@ Thumbs.db
 *.bin
 *.engine
 *.tflite
-weights/
 checkpoints/
 
 # Video files & large test media
