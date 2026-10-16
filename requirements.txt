@@ -1,0 +1,23 @@
+# ==============================================================================
+# AI Road Intelligence & Urban Traffic Surveillance
+# Minimal & Essential Dependencies
+# ==============================================================================
+
+# 1. Nền tảng Deep Learning & Xử lý ảnh (Dùng chung cho toàn bộ dự án)
+torch>=2.0.0
+torchvision>=0.15.0
+opencv-python>=4.8.0
+numpy>=1.24.0,<2.0.0
+Pillow>=9.5.0
+
+# 2. Module 1: Phân đoạn mặt đường (road_segmentation - Mask2Former & SegFormer)
+transformers>=4.30.0
+
+# 3. Module 2: Đếm xe & Cảnh báo giao thông (traffic_counter - YOLOv8)
+ultralytics>=8.0.0
+pydantic>=2.0.0
+requests>=2.28.0
+
+# 4. Module 3 & Suy luận ngập: Phân đoạn nước (flood_detector & flood_reasoning.py)
+segmentation-models-pytorch>=0.3.0
+efficientnet-pytorch>=0.7.1
