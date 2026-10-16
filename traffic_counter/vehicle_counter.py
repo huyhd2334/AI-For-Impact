@@ -217,25 +217,18 @@ class VehicleDetector:
                     if not is_near_bottom_edge and (bw / float(max(1, bh)) > 1.95):
                         continue
 
-                v_cls = v["class"]
+                # Strict NMS overlap suppression to eliminate duplicate bounding boxes
                 is_duplicate = False
                 for cv_item in clean_vehicles:
-                    cv_cls = cv_item["class"]
                     iou, ios = self._calc_iou_ios(v["box"], cv_item["box"])
-                    
-                    if v_cls != cv_cls:
-                        if iou > 0.55 or ios > 0.75:
-                            is_duplicate = True
-                            break
-                    else:
-                        if iou > 0.82:
-                            is_duplicate = True
-                            break
+                    if iou > 0.42 or ios > 0.58:
+                        is_duplicate = True
+                        break
                             
                 if not is_duplicate:
                     clean_vehicles.append(v)
 
-            # Centroid tracking and speed estimation
+            # Centroid & IoU tracking with windowed displacement speed estimation
             if not hasattr(self, 'next_track_id'):
                 self.next_track_id = 1
             if not hasattr(self, 'track_details'):
@@ -250,6 +243,7 @@ class VehicleDetector:
             line_x2 = int(img_w * 0.95)
 
             active_render_vehicles = []
+            matched_tids = set()
 
             for v in clean_vehicles:
                 cname = v["class"]
@@ -260,45 +254,76 @@ class VehicleDetector:
 
                 y_factor = max(1.0, cy / (float(img_h) * 0.55))
                 best_id = None
-                best_dist = max(140.0, float(bh) * 0.85) * y_factor
+                best_match_score = -1.0
+
                 for tid, td in list(self.track_details.items()):
-                    if timestamp - td['last_t'] < 1.2:
-                        d = math.hypot(cx - td['last_pos'][0], cy - td['last_pos'][1])
-                        if d < best_dist:
-                            best_dist = d
-                            best_id = tid
+                    if tid in matched_tids:
+                        continue
+                    if timestamp - td['last_t'] < 1.5:
+                        prev_box = td.get('last_box', (td['last_pos'][0]-bw/2, td['last_pos'][1]-bh/2, td['last_pos'][0]+bw/2, td['last_pos'][1]+bh/2))
+                        iou, ios = self._calc_iou_ios(v["box"], prev_box)
+                        dist = math.hypot(cx - td['last_pos'][0], cy - td['last_pos'][1])
+                        max_allowed_dist = max(55.0, float(bh) * 0.65) * y_factor
+
+                        if iou > 0.25:
+                            score = 100.0 + iou * 50.0 - (dist / 100.0)
+                            if score > best_match_score:
+                                best_match_score = score
+                                best_id = tid
+                        elif dist < max_allowed_dist:
+                            score = 50.0 - (dist / max_allowed_dist) * 30.0
+                            if score > best_match_score:
+                                best_match_score = score
+                                best_id = tid
 
                 speed_kmh = None
+                is_vehicle_stopped = False
+
                 if best_id is not None:
+                    matched_tids.add(best_id)
                     td = self.track_details[best_id]
                     dt = timestamp - td['last_t']
-                    if dt > 0.03:
-                        disp_px = best_dist
-                        if disp_px < 6.0:
-                            raw_spd = 0.0
-                        else:
-                            persp_scale = max(0.4, cy / float(img_h))
-                            m_per_px = (self.px_to_meter * 0.45) / persp_scale
-                            raw_spd = (disp_px * m_per_px / dt) * 3.6
-                            raw_spd = min(90.0, max(0.0, raw_spd))
-
-                        speed_kmh = (0.6 * td['prev_spd'] + 0.4 * raw_spd) if td['hit_count'] > 2 else raw_spd
-                        td['prev_spd'] = speed_kmh
-                    else:
-                        speed_kmh = td['prev_spd']
+                    
+                    if 'pos_history' not in td:
+                        td['pos_history'] = [(td['last_pos'][0], td['last_pos'][1], td['last_t'])]
+                    td['pos_history'].append((cx, cy, timestamp))
+                    # Keep only positions within the last 1.0 second
+                    td['pos_history'] = [(hx, hy, ht) for (hx, hy, ht) in td['pos_history'] if (timestamp - ht) <= 1.0]
 
                     td['prev_pos'] = td['last_pos']
                     td['last_pos'] = (cx, cy)
+                    td['last_box'] = (x1, y1, x2, y2)
                     td['last_t'] = timestamp
                     td['hit_count'] += 1
 
-                    total_disp = math.hypot(cx - td['start_pos'][0], cy - td['start_pos'][1])
-                    if td['hit_count'] >= 3:
-                        if total_disp < 15.0 or (speed_kmh is not None and speed_kmh < 4.0):
-                            td['is_stationary'] = True
-                            speed_kmh = 0.0
+                    # Measure speed over window (at least 0.20s) to eliminate frame jitter
+                    if len(td['pos_history']) >= 2:
+                        hist_x, hist_y, hist_t = td['pos_history'][0]
+                        w_dt = timestamp - hist_t
+                        w_disp = math.hypot(cx - hist_x, cy - hist_y)
+
+                        if w_dt >= 0.20:
+                            # If vehicle moved less than 16px over the window, it is completely stopped
+                            if w_disp < 16.0:
+                                speed_kmh = 0.0
+                                is_vehicle_stopped = True
+                            else:
+                                persp_scale = max(0.35, cy / float(img_h))
+                                m_per_px = (self.px_to_meter * 0.32) / persp_scale
+                                raw_spd = (w_disp * m_per_px / w_dt) * 3.6
+                                if raw_spd < 5.0:
+                                    speed_kmh = 0.0
+                                    is_vehicle_stopped = True
+                                else:
+                                    speed_kmh = min(80.0, max(0.0, raw_spd))
+                            td['prev_spd'] = speed_kmh
                         else:
-                            td['is_stationary'] = False
+                            speed_kmh = td['prev_spd']
+                            is_vehicle_stopped = (speed_kmh == 0.0)
+                    else:
+                        speed_kmh = 0.0
+                        is_vehicle_stopped = True
+
                     tid_show = best_id
                 else:
                     tid_show = self.next_track_id
@@ -307,18 +332,21 @@ class VehicleDetector:
                         'start_t': timestamp,
                         'prev_pos': (cx, cy),
                         'last_pos': (cx, cy),
+                        'last_box': (x1, y1, x2, y2),
+                        'pos_history': [(cx, cy, timestamp)],
                         'last_t': timestamp,
                         'hit_count': 1,
                         'is_stationary': False,
                         'prev_spd': 0.0,
                         'crossed_tripwire': False
                     }
+                    matched_tids.add(tid_show)
                     self.next_track_id += 1
+                    speed_kmh = None
 
                 td_curr = self.track_details[tid_show]
-                is_vehicle_stopped = td_curr['is_stationary'] or (speed_kmh is not None and speed_kmh < 4.0)
 
-                if is_vehicle_stopped:
+                if is_vehicle_stopped or (speed_kmh is not None and speed_kmh == 0.0):
                     stopped_vehicles += 1
                 elif speed_kmh is not None and speed_kmh < 12.0:
                     slow_vehicles += 1
@@ -425,7 +453,10 @@ class VehicleDetector:
                 color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
                 
-                spd_str = f" | {int(speed_kmh)}km/h" if (speed_kmh is not None and speed_kmh > 0) else ""
+                if speed_kmh is not None:
+                    spd_str = f" | {int(speed_kmh)}km/h" if speed_kmh > 0 else " | 0km/h"
+                else:
+                    spd_str = ""
                 label = f"#{tid_show} {cname}{spd_str}"
                 
                 cv2.putText(
