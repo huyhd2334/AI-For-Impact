@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-10-18T00:00:00.000Z" agent="SafeRoute AI" version="24.0.0" type="device">
+  <diagram id="diag_thumb_pipeline" name="Thumbnail to Status Pipeline">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Input Node -->
+        <mxCell id="n_thumb" value="&lt;b&gt;Ảnh Thumbnail Camera&lt;/b&gt;&lt;br&gt;(Snapshot tĩnh 640x360 / 1280x720)&lt;br&gt;+ camera_id + timestamp" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5fe;strokeColor=#0288d1;fontColor=#01579b;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="450" y="40" width="270" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Quality Check -->
+        <mxCell id="n_qcheck" value="&lt;b&gt;Kiểm tra chất lượng ảnh&lt;/b&gt;&lt;br&gt;Độ sáng &amp;lt; 18 (quá tối)&lt;br&gt;Laplacian variance &amp;lt; 30 (mờ tịt)&lt;br&gt;Bị che khuất ống kính?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#fbc02d;fontColor=#f57f17;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="140" width="210" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Unknown Branch -->
+        <mxCell id="n_unknown" value="&lt;b&gt;TRẠNG THÁI KHÔNG XÁC ĐỊNH&lt;/b&gt;&lt;br&gt;&lt;br&gt;• Flood: &lt;b&gt;UNKNOWN&lt;/b&gt;&lt;br&gt;• Traffic: &lt;b&gt;UNKNOWN&lt;/b&gt;&lt;br&gt;&lt;i&gt;(Báo camera cần bảo trì / góc khuất)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#efebe9;strokeColor=#8d6e63;fontColor=#4e342e;fontSize=12;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="840" y="150" width="240" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Valid Flow: Road Mask -->
+        <mxCell id="n_road_mask" value="&lt;b&gt;Lấy Road Mask (ROI Mặt Đường)&lt;/b&gt;&lt;br&gt;Reused Cache 0ms (TwinLiteNet)&lt;br&gt;Lọc bỏ vỉa hè, nhà dân, bầu trời" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f3e5f5;strokeColor=#7b1fa2;fontColor=#4a148c;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="480" y="280" width="210" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Branch Container 1: Flood -->
+        <mxCell id="box_flood" value="&lt;b&gt;NHÁNH PHÂN TÍCH NGẬP NƯỚC&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1976d2;fontColor=#0d47a1;fontSize=12;startSize=25;" vertex="1" parent="1">
+          <mxGeometry x="80" y="390" width="450" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="n_cv_water" value="&lt;b&gt;CV Water Segmentation&lt;/b&gt;&lt;br&gt;Tách vệt phản chiếu &amp;amp; đọng nước&lt;br&gt;Tính tỷ lệ: &lt;i&gt;road_water_ratio&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1976d2;fontSize=11;" vertex="1" parent="box_flood">
+          <mxGeometry x="20" y="40" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_vlm_reason" value="&lt;b&gt;Gemini Flash VLM&lt;/b&gt;&lt;br&gt;Nhận diện ngữ cảnh mặt nước&lt;br&gt;Dấu hiệu xe rẽ sóng, nước ngập" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1976d2;fontSize=11;" vertex="1" parent="box_flood">
+          <mxGeometry x="240" y="40" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_depth" value="&lt;b&gt;Depth Estimator&lt;/b&gt;&lt;br&gt;Ước lượng độ sâu chìm bánh xe máy / ô tô (cm)&lt;br&gt;Đánh giá: &lt;i&gt;safe_for_bikes (True/False)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1976d2;fontSize=11;" vertex="1" parent="box_flood">
+          <mxGeometry x="50" y="110" width="350" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="n_flood_rules" value="&lt;b&gt;Quy tắc phân loại Ngập:&lt;/b&gt;&lt;br&gt;• Nước &amp;lt; 3.5% &amp;rarr; &lt;font color='#2e7d32'&gt;&lt;b&gt;Không ngập&lt;/b&gt;&lt;/font&gt;&lt;br&gt;• Nước &amp;lt; 20cm, xe máy đi được &amp;rarr; &lt;font color='#f57c00'&gt;&lt;b&gt;Ngập đi được&lt;/b&gt;&lt;/font&gt;&lt;br&gt;• Nước &amp;gt; 20-25cm, ngập nửa bánh/pô xe &amp;rarr; &lt;font color='#d32f2f'&gt;&lt;b&gt;Ngập nhiều&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1976d2;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="box_flood">
+          <mxGeometry x="30" y="165" width="390" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- Branch Container 2: Traffic -->
+        <mxCell id="box_traffic" value="&lt;b&gt;NHÁNH PHÂN TÍCH TẮC ĐƯỜNG (TRÊN 1 ẢNH)&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#f57c00;fontColor=#e65100;fontSize=12;startSize=25;" vertex="1" parent="1">
+          <mxGeometry x="630" y="390" width="460" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="n_yolo" value="&lt;b&gt;YOLO Vehicle Detection&lt;/b&gt;&lt;br&gt;Detect: xe máy, ô tô, xe buýt, xe tải&lt;br&gt;Lọc bounding box nằm trên Road Mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f57c00;fontSize=11;" vertex="1" parent="box_traffic">
+          <mxGeometry x="30" y="40" width="400" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="n_occ" value="&lt;b&gt;Road Occupancy Ratio&lt;/b&gt;&lt;br&gt;Tỷ lệ chiếm dụng lòng đường:&lt;br&gt;&lt;i&gt;Occupancy = (Tổng diện tích bbox xe) / (Diện tích Road Mask)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f57c00;fontSize=11;" vertex="1" parent="box_traffic">
+          <mxGeometry x="30" y="100" width="400" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_traffic_rules" value="&lt;b&gt;Quy tắc phân loại Tắc:&lt;/b&gt;&lt;br&gt;• Occupancy &amp;lt; 14% &amp;amp; ít xe &amp;rarr; &lt;font color='#2e7d32'&gt;&lt;b&gt;CLEAR&lt;/b&gt;&lt;/font&gt;&lt;br&gt;• Occupancy 14% - 45% hoặc &amp;gt;= 8 xe &amp;rarr; &lt;font color='#f57c00'&gt;&lt;b&gt;CROWDED&lt;/b&gt;&lt;/font&gt;&lt;br&gt;• Occupancy &amp;gt;= 45% hoặc &amp;gt;= 20 xe ken đặc &amp;rarr; &lt;font color='#d32f2f'&gt;&lt;b&gt;HEAVY_CONGESTION&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#f57c00;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="box_traffic">
+          <mxGeometry x="30" y="165" width="400" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- Final Output: Fusion & Contract Event -->
+        <mxCell id="box_output" value="&lt;b&gt;KẾT QUẢ ĐẦU RA CHUẨN (CameraObservationEvent v1)&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=13;startSize=30;" vertex="1" parent="1">
+          <mxGeometry x="240" y="660" width="690" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="n_out_flood" value="&lt;b&gt;Trạng thái Ngập (flood_status_vn)&lt;/b&gt;&lt;br&gt;[ UNKNOWN | Không ngập | Ngập đi được | Ngập nhiều ]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2e7d32;fontSize=12;fontColor=#1b5e20;" vertex="1" parent="box_output">
+          <mxGeometry x="30" y="45" width="300" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_out_traffic" value="&lt;b&gt;Trạng thái Tắc (traffic_status)&lt;/b&gt;&lt;br&gt;[ UNKNOWN | CLEAR | CROWDED | HEAVY_CONGESTION ]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2e7d32;fontSize=12;fontColor=#1b5e20;" vertex="1" parent="box_output">
+          <mxGeometry x="360" y="45" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e_in" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#333333;strokeWidth=1.5;" edge="1" source="n_thumb" target="n_qcheck" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_bad" value="Ảnh quá tối / mờ" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#d32f2f;strokeWidth=1.5;fontColor=#d32f2f;fontSize=10;" edge="1" source="n_qcheck" target="n_unknown" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_ok" value="Ảnh rõ nét" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2e7d32;strokeWidth=1.5;fontColor=#2e7d32;fontSize=10;" edge="1" source="n_qcheck" target="n_road_mask" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_to_flood" value="Áp dụng Road Mask" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1976d2;strokeWidth=1.5;" edge="1" source="n_road_mask" target="box_flood" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="585" y="375" />
+              <mxPoint x="305" y="375" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_to_traffic" value="Áp dụng Road Mask" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#f57c00;strokeWidth=1.5;" edge="1" source="n_road_mask" target="box_traffic" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="585" y="375" />
+              <mxPoint x="860" y="375" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_f_out" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1976d2;strokeWidth=1.5;" edge="1" source="box_flood" target="box_output" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="305" y="640" />
+              <mxPoint x="430" y="640" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_t_out" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#f57c00;strokeWidth=1.5;" edge="1" source="box_traffic" target="box_output" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="860" y="640" />
+              <mxPoint x="730" y="640" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
