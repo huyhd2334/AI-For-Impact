@@ -12,6 +12,7 @@ Tài liệu này tập trung hướng dẫn **Cách Chạy (Execution)**, **Các
 | **2. Đếm xe & Đo kẹt xe**<br>`traffic_counter` | `python -m traffic_counter.main --source <input>` | Video (`.mp4`), Ảnh,<br>hoặc Luồng `rtsp://` | • `traffic_counter/outputs/`<br>• `events_outbox/`<br>• `evidence_captures/` | • `*_traffic.jpg`<br>• `*_traffic.json`<br>• `incident_*.json` / `telemetry_*.json`<br>• `evidence_*.jpg` |
 | **3. Phân đoạn nước & Đo độ sâu**<br>`flood_detector` | `python -m flood_detector.main --image <input>` | Ảnh chụp cảnh ngập (`.jpg`, `.png`) | `flood_detector/outputs/` | • `*_water_mask.png`<br>• `*_water_overlay.jpg`<br>• `*_flood_result.json` |
 | **4. Suy luận mức độ ngập đường**<br>`flood_reasoning.py` | `python flood_reasoning.py --image <input> --auto-run-road` | Ảnh chụp đường phố (`.jpg`, `.png`) | `outputs/` | • `*_flood_mask.png`<br>• `*_flooded_road_mask.png`<br>• `*_flood_reasoning_overlay.jpg`<br>• `*_flood_reasoning.json` |
+| **5. Hợp nhất AI Camera (Contract v1)**<br>`camera_ai` (FastAPI / CLI) | `python -m camera_ai.main --camera-id <id> --image <input>`<br>hoặc `--serve` | Ảnh Thumbnail (`.jpg`),<br>Video hoặc REST API | `evidence_captures/`<br>`road_segmentation/cache/` | • `CameraObservationEvent` (JSON)<br>• `obs_<id>_<event_id>.jpg` (Ảnh HUD)<br>• `*_road_mask.png` (Cache 0ms) |
 
 ---
 
@@ -405,7 +406,57 @@ Tất cả kết quả lưu tại thư mục gốc: **`outputs/`**
 
 ---
 
-## 5. Bảng Tổng Hợp Vị Trí File Output Toàn Dự Án
+## 5. Dịch Vụ AI Camera Hợp Nhất 5 Tầng (`camera_ai` - Contract v1)
+
+Module tích hợp toàn diện theo tài liệu SDD/SRD SE, chạy dưới dạng microservice FastAPI độc lập (hoặc CLI), xử lý cả **ảnh Thumbnail tĩnh (1 frame snapshot)** và **video stream liên tục**.
+
+### 5.1. Bảng Chi Tiết Input & Output Của Từng Nhánh
+
+| Nhánh / Thành Phần | Chức Năng Cốt Lõi | Dữ Liệu Đầu Vào (Input) | Dữ Liệu Đầu Ra (Output) | Quy Tắc Phán Quyết |
+| :--- | :--- | :--- | :--- | :--- |
+| **Nhánh 0: Quality Check Gate** | Kiểm tra ảnh lỗi, mờ tịt, ban đêm tối om, che khuất | • Ảnh Thumbnail (`np.ndarray`)<br>• `camera_id` | • `is_low_quality` (boolean)<br>• `mean_brightness`<br>• `laplacian_var` | Nếu Độ sáng $< 18$ hoặc Laplacian $< 30$ $\rightarrow$ Gán thẳng **Flood = `UNKNOWN`**, **Traffic = `UNKNOWN`**. |
+| **Nhánh 1: Road Segmentation** (`RoadMaskManager`) | Tách lòng đường, lưu cache vĩnh viễn tái sử dụng 0ms | • Frame chuẩn / snapshot<br>• `camera_id` | • `road_mask` (uint8 0/255)<br>• `sidewalk_mask`<br>• `is_cached` (bool)<br>• `road_ratio` (float) | Đọc file cache `.png` nếu có sẵn (0ms). Nếu chưa có, tự động chạy `TwinLiteNet` để trích xuất và lưu cache. |
+| **Nhánh 2A: Flood Reasoning** (`FloodReasoner`) | Xác định có nước trên lòng đường không & diện tích nước | • Frame mới (`np.ndarray`)<br>• `road_mask` từ Nhánh 1 | • `water_mask` (uint8)<br>• `road_water_ratio` (0-1)<br>• `is_flooded` (bool)<br>• `severity` (none/minor/mod/sev)<br>• `reason` (text) | Kết hợp CV lọc vùng phản chiếu ánh sáng gương nước + Gemini Flash VLM reasoning theo schema JSON. |
+| **Nhánh 2B: Depth Estimator** (`WaterDepthEstimator`) | Ước lượng độ sâu chìm bánh xe máy & ô tô | • Frame mới<br>• `water_mask`<br>• Bounding boxes các xe | • `water_depth_cm` (cm hoặc null)<br>• `depth_confidence` (0-1)<br>• `safe_for_bikes` (bool)<br>• `depth_method` | Đo tỷ lệ chìm bánh xe/gầm xe (automotive submersion). Nếu không có xe, dùng ước lượng hình học (geometric coverage). |
+| **Nhánh 3A: Vehicle Detector** (`VehicleDetector`) | Nhận diện & đếm số lượng xe trên lòng đường | • Frame mới<br>• `road_mask` | • `total_vehicles` (int)<br>• `vehicle_breakdown` (dict)<br>• `boxes` ([x1,y1,x2,y2]) | YOLOv8 nhận diện 5 lớp phương tiện Việt Nam (xe máy, ô tô, buýt, tải, xe đạp), chỉ lấy xe nằm trong lòng đường. |
+| **Nhánh 3B: Road Occupancy** *(Đặc thù Thumbnail)* | Đo tỷ lệ chiếm dụng lòng đường trên 1 ảnh tĩnh | • `boxes` các xe trên đường<br>• Diện tích `road_mask` | • `road_occupancy_ratio` (0.0 - 1.0) | $\text{Occupancy} = \frac{\sum \text{Diện tích bbox xe}}{\text{Diện tích Road Mask}}$. Dùng để phát hiện kẹt xe khi chỉ có 1 ảnh snapshot. |
+| **Nhánh 3C: Speed & Tripwire** *(Đặc thù Video)* | Đo vận tốc di chuyển & lưu lượng xe vượt vạch | • Chuỗi frame liên tục<br>• Timestamp video | • `avg_speed_kmh`<br>• `stopped_vehicles`<br>• `slow_vehicles`<br>• `flow_vpm` | Theo dõi quỹ đạo (tracking), tính $\Delta x / \Delta t$ để ra vận tốc thực tế của từng xe và phát hiện kẹt xe cứng. |
+| **Nhánh 4: Result Fusion Gate** (`CameraResultFusion`) | Hợp nhất kết quả thành hợp đồng chuẩn & bằng chứng | • Đầu ra Nhánh 0, 1, 2, 3<br>• `camera_id`, `source_revision` | • `CameraObservationEvent` (Contract v1)<br>• `CameraCurrentState`<br>• Ảnh bằng chứng HUD | Tổng hợp theo 4 mức Ngập và 4 mức Tắc chuẩn, vẽ banner HUD, ghi đè state mới nhất vào bộ nhớ/DB. |
+
+---
+
+### 5.2. Chuẩn Hóa 4 Trạng Thái Ngập & 4 Trạng Thái Tắc
+
+#### 🌊 Trạng thái Ngập (`flood_status_vn`):
+1. **`UNKNOWN`**: Ảnh lỗi, quá tối, mờ tịt hoặc độ tin cậy mô hình $< 0.45$.
+2. **`Không ngập`**: Mặt đường khô ráo, tỷ lệ nước trên đường $\text{road\_water\_ratio} < 3.5\%$, độ sâu = 0 cm.
+3. **`Ngập đi được`**: Nước ngập xăm xắp mắt cá chân / dưới nửa bánh xe máy ($< 20\text{ cm}$), xe máy và ô tô vẫn qua được an toàn (`safe_for_bikes = True`).
+4. **`Ngập nhiều`**: Nước ngập sâu ($> 20 - 25\text{ cm}$), ngập quá nửa bánh xe máy / lốc máy / pô xe, nguy hiểm, xe dễ chết máy (`safe_for_bikes = False`).
+
+#### 🚦 Trạng thái Tắc đường (`traffic_status`):
+1. **`UNKNOWN`**: Ảnh lỗi, mờ hoặc góc camera không thấy đường.
+2. **`CLEAR`**: Đường thông thoáng, tỷ lệ chiếm dụng $\text{Occupancy} < 14\%$, số lượng xe ít ($< 8$ xe).
+3. **`CROWDED`**: Đường đông đúc, $\text{Occupancy} \in [14\%, 45\%]$ hoặc $\ge 8$ xe, các xe vẫn di chuyển bình thường.
+4. **`HEAVY_CONGESTION`**: Tắc đường / kẹt xe nghiêm trọng, xe ken đặc $\text{Occupancy} \ge 45\%$ hoặc $\ge 20$ xe dồn ứ, hoặc xe dừng hẳn.
+
+---
+
+### 5.3. Cách Chạy Module Hợp Nhất
+
+```bash
+# 1. Khởi động REST API Server (port 8000)
+python -m camera_ai.main --serve --port 8000
+
+# 2. Phân tích 1 ảnh thumbnail snapshot
+python -m camera_ai.main --camera-id CAM_TEST_01 --image data_test/sample_day.jpg
+
+# 3. Phân tích video stream
+python -m camera_ai.main --camera-id CAM_TEST_01 --video data_test/day_1.mp4 --fps 5
+```
+
+---
+
+## 6. Bảng Tổng Hợp Vị Trí File Output Toàn Dự Án
 
 ```
 AI-For-Impact/
