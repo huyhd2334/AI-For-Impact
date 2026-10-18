@@ -82,7 +82,7 @@ def main():
         )
         print(f"\n[+] Video processing finished. Total observation events emitted: {len(events)}")
         if events:
-            print(f"Latest state: Flood={events[-1].flood_status.value} | Traffic={events[-1].traffic_status.value}")
+            print(f"Latest state: Flood={events[-1].flood_status_vn.value} | Traffic={events[-1].traffic_status.value}")
         return
 
     # If no argument, print help

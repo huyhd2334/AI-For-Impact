@@ -11,6 +11,13 @@ class FloodStatus(str, Enum):
     UNCERTAIN = "uncertain"
 
 
+class FinalFloodStatus(str, Enum):
+    UNKNOWN = "UNKNOWN"
+    NOT_FLOODED = "Không ngập"
+    PASSABLE_FLOOD = "Ngập đi được"
+    HEAVY_FLOOD = "Ngập nhiều"
+
+
 class FloodSeverity(str, Enum):
     NONE = "none"
     MINOR = "minor"
@@ -19,6 +26,7 @@ class FloodSeverity(str, Enum):
 
 
 class TrafficCongestionStatus(str, Enum):
+    UNKNOWN = "UNKNOWN"
     CLEAR = "CLEAR"
     CROWDED = "CROWDED"
     HEAVY_CONGESTION = "HEAVY_CONGESTION"
@@ -45,6 +53,10 @@ class CameraObservationEvent(BaseModel):
     flood_status: FloodStatus = Field(
         FloodStatus.NOT_FLOODED,
         description="Overall flood state: 'flooded', 'not_flooded', or 'uncertain'"
+    )
+    flood_status_vn: FinalFloodStatus = Field(
+        FinalFloodStatus.NOT_FLOODED,
+        description="User-facing Vietnamese flood status: 'UNKNOWN' | 'Không ngập' | 'Ngập đi được' | 'Ngập nhiều'"
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Overall confidence score (0.0 to 1.0)")
     model_version: str = Field("saferoute-fusion-v1.0", description="Model & pipeline version identifier")
@@ -76,12 +88,16 @@ class CameraObservationEvent(BaseModel):
         description="Percentage of the calibrated road mask currently covered by water"
     )
 
-    # Traffic Congestion Assessment (from Traffic Counter tracking across frames)
+    # Traffic Congestion Assessment (from Traffic Counter tracking across frames or snapshot occupancy)
     traffic_status: TrafficCongestionStatus = Field(
         TrafficCongestionStatus.CLEAR,
-        description="Traffic state: 'CLEAR' | 'CROWDED' | 'HEAVY_CONGESTION'"
+        description="Traffic state: 'UNKNOWN' | 'CLEAR' | 'CROWDED' | 'HEAVY_CONGESTION'"
     )
     is_jammed: bool = Field(False, description="True if vehicle bottleneck / gridlock is confirmed")
+    road_occupancy_ratio: float = Field(
+        0.0,
+        description="Ratio of road mask occupied by detected vehicles (0.0 to 1.0) for snapshot congestion analysis"
+    )
     total_vehicles: int = Field(0, ge=0, description="Total active vehicles detected on the road")
     vehicle_breakdown: Dict[str, int] = Field(
         default_factory=dict,
@@ -114,11 +130,13 @@ class CameraCurrentState(BaseModel):
     observed_at: str
     source_updated_at: str
     flood_status: FloodStatus
+    flood_status_vn: FinalFloodStatus = FinalFloodStatus.NOT_FLOODED
     severity: FloodSeverity
     water_depth_cm: Optional[float] = None
     confidence: float
     traffic_status: TrafficCongestionStatus
     is_jammed: bool
+    road_occupancy_ratio: float = 0.0
     total_vehicles: int
     avg_speed_kmh: Optional[float] = None
     safe_for_bikes: bool = True

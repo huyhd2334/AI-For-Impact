@@ -9,6 +9,7 @@ import numpy as np
 from .schemas import (
     CameraObservationEvent,
     FloodStatus,
+    FinalFloodStatus,
     FloodSeverity,
     TrafficCongestionStatus
 )
@@ -48,7 +49,13 @@ class CameraResultFusion:
         obs_time = observed_at or now_utc
         event_id = f"{camera_id.lower()}_rev{source_revision:04d}_{uuid.uuid4().hex[:6]}"
 
-        # 1. Fuse Flood Decision
+        # Check thumbnail image quality (blur / extreme darkness / occlusion)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+        mean_brightness = float(np.mean(gray))
+        laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        is_low_quality = (mean_brightness < 18.0) or (laplacian_var < 30.0)
+
+        # 1. Fuse Flood Decision (Mapping to: UNKNOWN, Không ngập, Ngập đi được, Ngập nhiều)
         is_flooded_reason = bool(flood_reasoning.get("is_flooded", False))
         reason_severity = str(flood_reasoning.get("severity", "none")).lower()
         reason_conf = float(flood_reasoning.get("confidence", 0.90))
@@ -57,30 +64,41 @@ class CameraResultFusion:
         depth_conf = depth_estimation.get("depth_confidence")
         depth_method = depth_estimation.get("depth_method")
 
-        if not is_flooded_reason and road_water_ratio < 0.035:
+        if is_low_quality:
+            flood_status = FloodStatus.UNCERTAIN
+            flood_status_vn = FinalFloodStatus.UNKNOWN
+            severity = FloodSeverity.NONE
+            safe_for_bikes = True
+            confidence = 0.35
+        elif not is_flooded_reason and road_water_ratio < 0.035:
             flood_status = FloodStatus.NOT_FLOODED
+            flood_status_vn = FinalFloodStatus.NOT_FLOODED
             severity = FloodSeverity.NONE
             safe_for_bikes = True
             confidence = max(0.92, reason_conf)
         elif reason_conf >= 0.70 or road_water_ratio >= 0.08:
             flood_status = FloodStatus.FLOODED
             confidence = min(0.98, max(reason_conf, depth_conf or 0.80))
-            if (depth_cm is not None and depth_cm >= 35.0) or road_water_ratio >= 0.28 or reason_severity == "severe":
+            if (depth_cm is not None and depth_cm >= 25.0) or road_water_ratio >= 0.25 or reason_severity == "severe":
                 severity = FloodSeverity.SEVERE
                 safe_for_bikes = False
+                flood_status_vn = FinalFloodStatus.HEAVY_FLOOD
             elif (depth_cm is not None and depth_cm >= 15.0) or road_water_ratio >= 0.12 or reason_severity == "moderate":
                 severity = FloodSeverity.MODERATE
                 safe_for_bikes = False
+                flood_status_vn = FinalFloodStatus.HEAVY_FLOOD
             else:
                 severity = FloodSeverity.MINOR
                 safe_for_bikes = bool(flood_reasoning.get("safe_for_bikes", True))
+                flood_status_vn = FinalFloodStatus.PASSABLE_FLOOD
         else:
             flood_status = FloodStatus.UNCERTAIN
+            flood_status_vn = FinalFloodStatus.UNKNOWN
             severity = FloodSeverity.MINOR
             safe_for_bikes = True
             confidence = round(reason_conf, 2)
 
-        # 2. Fuse Traffic Congestion Decision
+        # 2. Fuse Traffic Congestion Decision for Thumbnail/Snapshot (Mapping to: UNKNOWN, CLEAR, CROWDED, HEAVY_CONGESTION)
         total_vehicles = int(traffic_data.get("total_vehicles", 0))
         vehicle_breakdown = traffic_data.get("breakdown", {})
         stopped_vehicles = int(traffic_data.get("stopped_vehicles", 0))
@@ -89,9 +107,22 @@ class CameraResultFusion:
         flow_vpm = float(traffic_data.get("flow_vpm", 0.0))
         is_jammed = bool(traffic_data.get("is_jammed", False))
 
-        if is_jammed:
+        # Calculate Road Occupancy Ratio on snapshot
+        boxes = traffic_data.get("boxes", [])
+        road_pixels = int(np.count_nonzero(road_mask)) if (road_mask is not None and np.any(road_mask > 0)) else int(frame.shape[0] * frame.shape[1] * 0.40)
+        total_veh_area = 0.0
+        for b in boxes:
+            if len(b) == 4:
+                bw = max(0, b[2] - b[0])
+                bh = max(0, b[3] - b[1])
+                total_veh_area += (bw * bh)
+        road_occupancy_ratio = min(1.0, round(total_veh_area / max(1, road_pixels), 4))
+
+        if is_low_quality:
+            traffic_status = TrafficCongestionStatus.UNKNOWN
+        elif is_jammed or road_occupancy_ratio >= 0.45 or (total_vehicles >= 20 and road_occupancy_ratio >= 0.32):
             traffic_status = TrafficCongestionStatus.HEAVY_CONGESTION
-        elif total_vehicles >= 10 or (avg_speed_kmh is not None and avg_speed_kmh < 22.0):
+        elif road_occupancy_ratio >= 0.14 or total_vehicles >= 8 or (avg_speed_kmh is not None and avg_speed_kmh < 22.0):
             traffic_status = TrafficCongestionStatus.CROWDED
         else:
             traffic_status = TrafficCongestionStatus.CLEAR
@@ -99,9 +130,10 @@ class CameraResultFusion:
         # 3. Construct Unified Reasoning String
         depth_str = f", độ sâu ước tính ~{depth_cm:.1f} cm ({depth_method})" if depth_cm else ""
         spd_str = f", tốc độ TB: {avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else ""
+        occ_str = f", chiếm dụng: {int(road_occupancy_ratio * 100)}% lòng đường"
         reason_text = (
-            f"Trạng thái ngập: {flood_status.value.upper()} [{severity.value.upper()}]{depth_str}. "
-            f"Giao thông: {traffic_status.value} ({total_vehicles} xe, {stopped_vehicles} xe dừng{spd_str}). "
+            f"Trạng thái ngập: {flood_status_vn.value} ({flood_status.value.upper()}[{severity.value.upper()}]{depth_str}). "
+            f"Giao thông: {traffic_status.value} ({total_vehicles} xe{occ_str}, {stopped_vehicles} xe dừng{spd_str}). "
             f"{flood_reasoning.get('reason', '')}"
         )
 
@@ -124,7 +156,6 @@ class CameraResultFusion:
         # Blend traffic counter annotations if present
         annotated_traffic = traffic_data.get("annotated_frame")
         if annotated_traffic is not None and annotated_traffic.shape == annotated.shape:
-            # Transfer bounding boxes
             annotated = cv2.addWeighted(annotated, 0.50, annotated_traffic, 0.50, 0)
 
         # Render Professional HUD Dashboard Banner
@@ -132,16 +163,16 @@ class CameraResultFusion:
         hud_thick = max(1, int(hud_scale * 1.8))
         banner_h = int(105 * hud_scale)
 
-        hud_color = (0, 0, 255) if (severity in [FloodSeverity.SEVERE, FloodSeverity.MODERATE] or is_jammed) else (
-            (0, 165, 255) if (severity == FloodSeverity.MINOR or traffic_status == TrafficCongestionStatus.CROWDED) else (0, 255, 0)
+        hud_color = (0, 0, 255) if (flood_status_vn == FinalFloodStatus.HEAVY_FLOOD or traffic_status == TrafficCongestionStatus.HEAVY_CONGESTION) else (
+            (0, 165, 255) if (flood_status_vn == FinalFloodStatus.PASSABLE_FLOOD or traffic_status == TrafficCongestionStatus.CROWDED) else (0, 255, 0)
         )
 
-        cv2.rectangle(annotated, (10, 10), (min(w - 10, int(820 * hud_scale)), banner_h), (20, 20, 20), -1)
-        cv2.rectangle(annotated, (10, 10), (min(w - 10, int(820 * hud_scale)), banner_h), hud_color, 2)
+        cv2.rectangle(annotated, (10, 10), (min(w - 10, int(860 * hud_scale)), banner_h), (20, 20, 20), -1)
+        cv2.rectangle(annotated, (10, 10), (min(w - 10, int(860 * hud_scale)), banner_h), hud_color, 2)
 
-        flood_badge = f"FLOOD: {flood_status.value.upper()} [{severity.value.upper()}]"
+        flood_badge = f"NGAP: {flood_status_vn.value.upper()}"
         if depth_cm is not None:
-            flood_badge += f" | {depth_cm:.1f}cm"
+            flood_badge += f" | ~{depth_cm:.1f}cm"
 
         cv2.putText(
             annotated,
@@ -154,10 +185,10 @@ class CameraResultFusion:
             cv2.LINE_AA
         )
 
-        speed_text = f"{avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else "Measuring..."
+        speed_text = f"{avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else "N/A"
         cv2.putText(
             annotated,
-            f"TRAFFIC: {traffic_status.value} | {total_vehicles} VEH (STOPPED: {stopped_vehicles}) | SPD: {speed_text}",
+            f"GIAO THONG: {traffic_status.value} | {total_vehicles} VEH (OCC: {int(road_occupancy_ratio*100)}%) | SPD: {speed_text}",
             (20, int(60 * hud_scale)),
             cv2.FONT_HERSHEY_SIMPLEX,
             hud_scale * 0.65,
@@ -167,10 +198,10 @@ class CameraResultFusion:
         )
 
         road_status_str = "REUSED_CACHE (0ms)" if road_cached else "CALIBRATED_NEW"
-        bikes_str = "SAFE" if safe_for_bikes else "DANGEROUS"
+        bikes_str = "DI DUOC" if safe_for_bikes else "NGUY HIEM"
         cv2.putText(
             annotated,
-            f"ROAD MASK: {road_status_str} | BIKES: {bikes_str} | CONF: {int(confidence*100)}%",
+            f"ROAD MASK: {road_status_str} | XE MAY: {bikes_str} | CONF: {int(confidence*100)}%",
             (20, int(88 * hud_scale)),
             cv2.FONT_HERSHEY_SIMPLEX,
             hud_scale * 0.60,
@@ -195,6 +226,7 @@ class CameraResultFusion:
             source_updated_at=now_utc,
             source_revision=source_revision,
             flood_status=flood_status,
+            flood_status_vn=flood_status_vn,
             confidence=confidence,
             model_version="saferoute-fusion-v1.0",
             severity=severity,
@@ -205,6 +237,7 @@ class CameraResultFusion:
             road_water_ratio=round(road_water_ratio, 4),
             traffic_status=traffic_status,
             is_jammed=is_jammed,
+            road_occupancy_ratio=road_occupancy_ratio,
             total_vehicles=total_vehicles,
             vehicle_breakdown=vehicle_breakdown,
             stopped_vehicles=stopped_vehicles,

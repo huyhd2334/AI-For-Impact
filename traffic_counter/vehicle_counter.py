@@ -179,6 +179,7 @@ class VehicleDetector:
 
             raw_vehicles.sort(key=lambda x: x["conf"], reverse=True)
             raw_persons.sort(key=lambda x: x["conf"], reverse=True)
+            self.last_detected_vehicles = list(raw_vehicles)
 
             # Associate orphan riders when camera view cuts off vehicle chassis
             img_h, img_w = frame.shape[:2]

@@ -1,0 +1,124 @@
+flowchart TB
+    %% TẦNG 1: INGESTION & INPUTS
+    subgraph L1 ["1. DATA INGESTION & CAMERA INPUT LAYER"]
+        direction LR
+        IN_STREAM["Camera RTSP / Video Source\n(H.264 / MP4 / JPEG Stream)"]
+        IN_PARAMS["Request Context\n- camera_id: str (Registry Key)\n- timestamp: float (Video Time Sec)\n- use_llm: bool | target_fps: float"]
+        IN_STREAM --> PRE_DECODE["OpenCV Frame Decoder\n(cv2.VideoCapture / cv2.imdecode)\nRGB & BGR Matrix [H, W, 3]"]
+    end
+
+    %% TẦNG 2: ROAD SEGMENTATION & ROI CACHING ENGINE
+    subgraph L2 ["2. ROAD SEGMENTATION & 0-MS ROI CACHING (road_manager.py)"]
+        direction TB
+        CHECK_CACHE{"Cache Check\n(is_calibrated?)"}
+        
+        subgraph CALIB_FLOW ["Calibration Phase (Frame Chuẩn)"]
+            TWINLITE["TwinLiteNet / Mask2Former\n- Weights: weights/best.pth (1.8MB)\n- Input: 3840x2160 / 1280x720\n- Device: CUDA (PyTorch fp32/fp16)"]
+            MORPH_CLEAN["Morphological Cleaning\n& Polygon Extraction\n(cv2.findContours -> Vector Polys)"]
+            DISK_CACHE[("Persistent Cache Storage\n- cache/{cam_id}_road_mask.png\n- cache/{cam_id}_road_roi.json")]
+            TWINLITE --> MORPH_CLEAN --> DISK_CACHE
+        end
+        
+        RAM_CACHE[("In-Memory Mask Cache\nRAM Dict (0ms Lookup)\n(road_mask [H,W] uint8)")]
+        
+        CHECK_CACHE -->|Chưa có| TWINLITE
+        CHECK_CACHE -->|Đã có| RAM_CACHE
+        DISK_CACHE --> RAM_CACHE
+    end
+
+    %% TẦNG 3: MULTI-TASK PARALLEL INFERENCE PIPELINE
+    subgraph L3 ["3. CORE MULTI-TASK INFERENCE PIPELINE (Frame Mới)"]
+        direction TB
+
+        %% Nhánh 1: Flood Reasoning
+        subgraph MOD_REASON ["Module 1: Flood Reasoning Engine (flood_reasoner.py)"]
+            direction TB
+            ROAD_MASKING["Road-Corridor Masking\ncv2.bitwise_and(Frame, Frame, mask=road_mask)\n-> Loại bỏ hoàn toàn sky, nhà, cây"]
+            
+            VLM_GATE{"LLM Gate\n(GEMINI_API_KEY?)"}
+            
+            GEMINI_API["Google Gemini Flash API\n(gemini-2.5-flash / gemini-2.0-flash)\n- Structured JSON Schema (Strict Mode)\n- Payload: Base64 JPEG (q=85)\n-> is_flooded, severity, safe_for_bikes"]
+            
+            CV_REASON["Local Heuristic CV Reasoner\n- HSV Space (s < 55, v > 130)\n- Specular Headlight Reflection (s < 40, v > 220)\n- Surface Flatness (|Laplacian| < 14)\n-> road_water_ratio = count(Water on Road) / count(Road)"]
+            
+            ROAD_MASKING --> VLM_GATE
+            VLM_GATE -->|Có API Key| GEMINI_API
+            VLM_GATE -->|Offline / Fallback| CV_REASON
+        end
+
+        %% Nhánh 2: Water Depth Estimator
+        subgraph MOD_DEPTH ["Module 2: Water Depth & Credibility Estimator (depth_estimator.py)"]
+            direction TB
+            WATER_SEG["Water Surface Segmentation\n(Pixel-level binary mask W)"]
+            
+            SUBMERSION_CHECK{"Mốc Tham Chiếu Ngập\n(detected_vehicles boxes)"}
+            
+            AUTO_DEPTH["Automotive Submersion\n- Contact area: [y2-10% : y2+8%]\n- Vành xe: ~12-18cm (conf 0.85)\n- Nửa bánh: ~25-35cm (conf 0.88)\n- Chạm gầm/pô: ~40-60cm (conf 0.90)"]
+            
+            GEOM_DEPTH["Geometric Planar Curve\n- Ratio < 10%: 4-8cm (xâm xấp)\n- Ratio 10-25%: 10-20cm (ngập vừa)\n- Ratio > 25%: 25-50cm (ngập sâu)"]
+            
+            WATER_SEG --> SUBMERSION_CHECK
+            SUBMERSION_CHECK -->|Có xe trong nước| AUTO_DEPTH
+            SUBMERSION_CHECK -->|Không có xe| GEOM_DEPTH
+        end
+
+        %% Nhánh 3: Traffic Counter & Tracking
+        subgraph MOD_TRAFFIC ["Module 3: Vehicle Detector & Speed Tracker (vehicle_counter.py)"]
+            direction TB
+            YOLO_DET["YOLOv8 Neural Detector\n- Model: vn_traffic_surveillance.pt\n- Device: CUDA (RTX 3050) | imgsz=1280\n- Strict NMS (IoU > 0.42, IoS > 0.58)"]
+            
+            TRACKER["Centroid & IoU Windowed Tracker\n- Adaptive Radius: max(80px, bh*1.5, 300*dt)*y_factor\n- Pos History Buffer: window dt >= 0.18s"]
+            
+            SPEED_CALC["Perspective Velocity Calculator\n- m_per_px = px_to_meter / (0.35 + 0.65*norm_y)\n- Raw Speed: (w_disp * m_per_px / w_dt) * 3.6\n- Jitter Gate: disp < 5px or spd < 3.5 km/h -> 0 km/h\n- EMA Filter: 0.55 * v_new + 0.45 * v_prev"]
+            
+            JAM_LOGIC["Congestion State Classifier\n- is_jammed: stopped_ratio >= 35% AND total >= 10\n- Status: CLEAR (1) | CROWDED (2) | HEAVY_CONGESTION (3)"]
+            
+            YOLO_DET --> TRACKER --> SPEED_CALC --> JAM_LOGIC
+        end
+    end
+
+    %% TẦNG 4: RESULT FUSION GATE
+    subgraph L4 ["4. RESULT FUSION & ENSEMBLE GATE (fusion.py)"]
+        direction TB
+        FUSION_DECISION["Multi-Factor Decision Engine\n1. Flood Status: flooded | not_flooded | uncertain\n2. Severity: none | minor | moderate | severe\n3. Traffic Status: CLEAR | CROWDED | HEAVY_CONGESTION\n4. Synthesized Reason String"]
+        
+        HUD_ENGINE["Composite Evidence Visualizer\n- Road Contour Overlay (Cyan/Orange vector)\n- Translucent Water Mask Blending (alpha=0.35)\n- Vehicle BBoxes + IDs + Speed labels\n- Top HUD Dashboard Banner (Alert colored)"]
+        
+        SAVE_EVID[("Evidence Storage\nevidence_captures/obs_{cam_id}_{evt_id}.jpg")]
+        
+        FUSION_DECISION --> HUD_ENGINE --> SAVE_EVID
+    end
+
+    %% TẦNG 5: API & STORAGE (SE SYSTEM SPECIFICATION CONTRACT v1)
+    subgraph L5 ["5. FASTAPI REST SERVICE & SE CONTRACT v1 (api.py & schemas.py)"]
+        direction TB
+        
+        CONTRACT_V1["CameraObservationEvent Schema v1\n- event_id: str (UUID / Sequence)\n- camera_id: str\n- observed_at: str (ISO-8601 UTC)\n- source_revision: int (Monotonic)\n- flood_status: Enum | severity: Enum\n- water_depth_cm: float | depth_confidence: float\n- traffic_status: Enum | is_jammed: bool\n- total_vehicles: int | stopped_vehicles: int\n- avg_speed_kmh: float | flow_vpm: float\n- road_mask_cached: bool\n- evidence_ref: str (URI/Path)"]
+        
+        FASTAPI_ROUTER["FastAPI Router Endpoints\n- POST /api/v1/camera/calibrate (/upload)\n- POST /api/v1/camera/analyze-frame (/upload)\n- POST /api/v1/camera/analyze-video\n- GET  /api/v1/camera/{id}/state\n- GET  /api/v1/camera/{id}/events (Cursor replay)"]
+        
+        DB_CURRENT[("Table: camera_current_state\n(Upsert 1 row mới nhất / camera)")]
+        DB_EVENTS[("Table: camera_state_events\n(Append-only log, read by .NET Worker)")]
+        
+        CONTRACT_V1 --> DB_CURRENT
+        CONTRACT_V1 --> DB_EVENTS
+        FASTAPI_ROUTER <--> CONTRACT_V1
+    end
+
+    %% DATA PIPELINE EDGES
+    PRE_DECODE --> CHECK_CACHE
+    PRE_DECODE --> ROAD_MASKING
+    PRE_DECODE --> WATER_SEG
+    PRE_DECODE --> YOLO_DET
+    
+    RAM_CACHE -.->|Reused Mask 0ms| ROAD_MASKING
+    RAM_CACHE -.->|Spatial Anchor| WATER_SEG
+
+    GEMINI_API --> FUSION_DECISION
+    CV_REASON --> FUSION_DECISION
+    AUTO_DEPTH --> FUSION_DECISION
+    GEOM_DEPTH --> FUSION_DECISION
+    JAM_LOGIC --> FUSION_DECISION
+    TRACKER -.->|Vehicles boxes| SUBMERSION_CHECK
+
+    FUSION_DECISION --> CONTRACT_V1

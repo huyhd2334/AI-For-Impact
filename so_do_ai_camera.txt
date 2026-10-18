@@ -1,0 +1,38 @@
+flowchart TD
+    INPUT["Video camera + camera_id + thời điểm"]
+
+    subgraph S1 ["Hiệu chuẩn ban đầu"]
+        F_STD["Frame chuẩn"] --> ROAD_SEG["Road segmentation"] --> ROAD_MASK[("road_mask\n(lưu để tái sử dụng)")]
+    end
+
+    subgraph S2 ["Xử lý Frame mới & Video"]
+        F_NEW["Frame mới"]
+        F_SEQS["Nhiều frame liên tiếp"]
+
+        F_REASON["Flood reasoning\n(có nước trên đường? bao nhiêu?)"]
+        F_DETECT["Flood detector\n(độ sâu có đáng tin không?)"]
+        F_TRAFFIC["Traffic counter\n(xe có di chuyển / chậm / dừng?)"]
+
+        F_NEW --> F_REASON
+        F_NEW --> F_DETECT
+        F_SEQS --> F_TRAFFIC
+    end
+
+    subgraph S3 ["Tổng hợp"]
+        FUSION{"Bộ kết hợp kết quả"}
+        OUT_FLOOD["Trạng thái ngập"]
+        OUT_JAM["Mức ùn tắc"]
+        
+        FUSION --> OUT_FLOOD
+        FUSION --> OUT_JAM
+    end
+
+    INPUT --> F_STD
+    INPUT --> F_NEW
+    INPUT --> F_SEQS
+
+    ROAD_MASK -.->|Tái sử dụng| F_REASON
+
+    F_REASON --> FUSION
+    F_DETECT --> FUSION
+    F_TRAFFIC --> FUSION

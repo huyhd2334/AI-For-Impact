@@ -10,6 +10,7 @@ from .schemas import (
     CameraObservationEvent,
     CameraCurrentState,
     FloodStatus,
+    FinalFloodStatus,
     FloodSeverity,
     TrafficCongestionStatus
 )
@@ -108,6 +109,10 @@ class UnifiedCameraAnalyzer:
         elif total_vehicles >= 25:
             is_jammed = True
 
+        detected_boxes = [v.get("box") for v in getattr(self.vehicle_detector, 'last_detected_vehicles', []) if "box" in v]
+        if not detected_boxes:
+            detected_boxes = [td['last_box'] for tid, td in getattr(self.vehicle_detector, 'track_details', {}).items() if 'last_box' in td]
+
         traffic_data = {
             "total_vehicles": total_vehicles,
             "breakdown": breakdown,
@@ -116,6 +121,7 @@ class UnifiedCameraAnalyzer:
             "avg_speed_kmh": avg_speed_kmh,
             "flow_vpm": flow_vpm,
             "is_jammed": is_jammed,
+            "boxes": detected_boxes,
             "annotated_frame": annotated_traffic
         }
 
@@ -173,11 +179,13 @@ class UnifiedCameraAnalyzer:
             observed_at=event.observed_at,
             source_updated_at=event.source_updated_at,
             flood_status=event.flood_status,
+            flood_status_vn=event.flood_status_vn,
             severity=event.severity,
             water_depth_cm=event.water_depth_cm,
             confidence=event.confidence,
             traffic_status=event.traffic_status,
             is_jammed=event.is_jammed,
+            road_occupancy_ratio=event.road_occupancy_ratio,
             total_vehicles=event.total_vehicles,
             avg_speed_kmh=event.avg_speed_kmh,
             safe_for_bikes=event.safe_for_bikes,
