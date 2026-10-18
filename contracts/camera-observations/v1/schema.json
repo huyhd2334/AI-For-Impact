@@ -1,0 +1,229 @@
+{
+  "$defs": {
+    "FloodSeverity": {
+      "enum": [
+        "none",
+        "minor",
+        "moderate",
+        "severe"
+      ],
+      "title": "FloodSeverity",
+      "type": "string"
+    },
+    "FloodStatus": {
+      "enum": [
+        "flooded",
+        "not_flooded",
+        "uncertain"
+      ],
+      "title": "FloodStatus",
+      "type": "string"
+    },
+    "TrafficCongestionStatus": {
+      "enum": [
+        "CLEAR",
+        "CROWDED",
+        "HEAVY_CONGESTION"
+      ],
+      "title": "TrafficCongestionStatus",
+      "type": "string"
+    }
+  },
+  "description": "Standard Camera Observation Contract v1 (SafeRoute AI - System Specification 5.2 & SDD 7.1).\nProduced by the Camera AI deployable and read by the SafeRoute Worker.",
+  "properties": {
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "camera_id": {
+      "description": "Unique camera ID in SafeRoute registry (e.g. CAM_BINHTHANH_01)",
+      "title": "Camera Id",
+      "type": "string"
+    },
+    "observed_at": {
+      "description": "UTC ISO-8601 timestamp when frame was captured",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "source_updated_at": {
+      "description": "UTC ISO-8601 timestamp when observation was generated",
+      "title": "Source Updated At",
+      "type": "string"
+    },
+    "source_revision": {
+      "default": 1,
+      "description": "Monotonically increasing sequence revision for this camera",
+      "title": "Source Revision",
+      "type": "integer"
+    },
+    "flood_status": {
+      "$ref": "#/$defs/FloodStatus",
+      "default": "not_flooded",
+      "description": "Overall flood state: 'flooded', 'not_flooded', or 'uncertain'"
+    },
+    "confidence": {
+      "description": "Overall confidence score (0.0 to 1.0)",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "model_version": {
+      "default": "saferoute-fusion-v1.0",
+      "description": "Model & pipeline version identifier",
+      "title": "Model Version",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/FloodSeverity",
+      "default": "none",
+      "description": "Observed severity category: 'none', 'minor', 'moderate', or 'severe'"
+    },
+    "water_depth_cm": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Estimated water depth in centimeters (null if not calibrated or dry)",
+      "title": "Water Depth Cm"
+    },
+    "depth_confidence": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Credibility score for the estimated water depth",
+      "title": "Depth Confidence"
+    },
+    "depth_method": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Method used for depth: 'anthropometric' | 'automotive' | 'geometric_water_coverage' | None",
+      "title": "Depth Method"
+    },
+    "safe_for_bikes": {
+      "default": true,
+      "description": "True if road conditions are passable for motorcycles and bicycles",
+      "title": "Safe For Bikes",
+      "type": "boolean"
+    },
+    "road_water_ratio": {
+      "default": 0.0,
+      "description": "Percentage of the calibrated road mask currently covered by water",
+      "title": "Road Water Ratio",
+      "type": "number"
+    },
+    "traffic_status": {
+      "$ref": "#/$defs/TrafficCongestionStatus",
+      "default": "CLEAR",
+      "description": "Traffic state: 'CLEAR' | 'CROWDED' | 'HEAVY_CONGESTION'"
+    },
+    "is_jammed": {
+      "default": false,
+      "description": "True if vehicle bottleneck / gridlock is confirmed",
+      "title": "Is Jammed",
+      "type": "boolean"
+    },
+    "total_vehicles": {
+      "default": 0,
+      "description": "Total active vehicles detected on the road",
+      "minimum": 0,
+      "title": "Total Vehicles",
+      "type": "integer"
+    },
+    "vehicle_breakdown": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "Classification breakdown (motorcycle, car, bus, truck, bicycle)",
+      "title": "Vehicle Breakdown",
+      "type": "object"
+    },
+    "stopped_vehicles": {
+      "default": 0,
+      "description": "Number of stationary vehicles (0 km/h)",
+      "minimum": 0,
+      "title": "Stopped Vehicles",
+      "type": "integer"
+    },
+    "slow_vehicles": {
+      "default": 0,
+      "description": "Number of slow crawling vehicles (< 15 km/h)",
+      "minimum": 0,
+      "title": "Slow Vehicles",
+      "type": "integer"
+    },
+    "avg_speed_kmh": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Average speed in km/h of moving traffic",
+      "title": "Avg Speed Kmh"
+    },
+    "flow_vpm": {
+      "default": 0.0,
+      "description": "Vehicles per minute crossing virtual tripwire",
+      "minimum": 0.0,
+      "title": "Flow Vpm",
+      "type": "number"
+    },
+    "road_mask_cached": {
+      "default": true,
+      "description": "True if pre-calibrated road mask was reused without re-segmentation overhead",
+      "title": "Road Mask Cached",
+      "type": "boolean"
+    },
+    "evidence_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "URI or relative file path to the annotated evidence image",
+      "title": "Evidence Ref"
+    },
+    "reason": {
+      "description": "Concise explanation of detection cues and gate decision",
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "camera_id",
+    "confidence",
+    "reason"
+  ],
+  "title": "CameraObservationEvent",
+  "type": "object"
+}

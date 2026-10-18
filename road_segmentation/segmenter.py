@@ -126,11 +126,17 @@ class RoadSegmenter:
             print("[RoadSegmenter] Calibration cache loaded successfully (0 ms overhead)")
             return
 
-        print(f"[RoadSegmenter] Running Mask2Former Calibration on {source_id}...")
-        road_mask, sidewalk_mask = self._infer_mask2former(reference_frame, orig_w, orig_h)
-        self.calibrated_road_mask = road_mask
-        self.calibrated_sidewalk_mask = sidewalk_mask
-        self.calibrated_polygons = self.extract_road_polygons(road_mask)
+        print(f"[RoadSegmenter] Running {self.engine.upper()} Calibration on {source_id}...")
+        if self.engine == "twinlite":
+            road_mask, sidewalk_mask = self._infer_twinlite(reference_frame, orig_w, orig_h)
+        elif self.engine == "mask2former":
+            road_mask, sidewalk_mask = self._infer_mask2former(reference_frame, orig_w, orig_h)
+        else:
+            road_mask, sidewalk_mask = self._infer_segformer(reference_frame, orig_w, orig_h)
+
+        self.calibrated_road_mask = (road_mask > 0).astype(np.uint8) * 255
+        self.calibrated_sidewalk_mask = (sidewalk_mask > 0).astype(np.uint8) * 255
+        self.calibrated_polygons = self.extract_road_polygons(self.calibrated_road_mask)
 
         cv2.imwrite(str(mask_file), road_mask)
         cv2.imwrite(str(side_file), sidewalk_mask)
