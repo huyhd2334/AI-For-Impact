@@ -99,6 +99,17 @@ class WaterDepthEstimator:
                 "depth_description": f"[Độ sâu mốc xe] {desc} (~{depth_cm:.1f} cm)"
             }
 
+        # Physical Constraint: If vehicles are present on the road, and NONE of them show tire submersion,
+        # then the road CANNOT be significantly flooded! Ground truth from tires proves pavement is dry/damp only.
+        if detected_vehicles and len(detected_vehicles) >= 2 and len(vehicles_in_water) == 0:
+            return {
+                "water_depth_cm": None,
+                "depth_confidence": 0.95,
+                "depth_method": "automotive_dry_ground_truth",
+                "is_depth_credible": True,
+                "depth_description": "Không có ngập sâu (bánh xe các phương tiện trên đường tiếp xúc mặt đất khô ráo, không bị chìm nước)."
+            }
+
         # 3. Geometric Planar Inundation Estimation (when no vehicle directly submerged)
         if road_water_ratio < 0.10:
             depth_cm = round(4.0 + road_water_ratio * 40.0, 1)

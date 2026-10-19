@@ -100,14 +100,13 @@ class UnifiedCameraAnalyzer:
         slow_vehicles = tripwire_info.get("slow_vehicles", 0)
         flow_vpm = tripwire_info.get("flow_vpm", 0.0)
 
-        # Intelligent Multi-factor Congestion Analysis
+        # Intelligent Multi-factor Congestion Analysis (speed & movement based on active video tracking)
         is_jammed = False
-        if avg_speed_kmh is not None and avg_speed_kmh < 15.0 and total_vehicles >= 10:
+        speed_measured_count = tripwire_info.get("speed_measured_count", 0)
+        if avg_speed_kmh is not None and speed_measured_count >= 3 and avg_speed_kmh < 15.0 and total_vehicles >= 10:
             slow_or_stopped = (stopped_vehicles + slow_vehicles) / float(max(1, total_vehicles))
             if slow_or_stopped >= 0.35 or avg_speed_kmh < 8.0:
                 is_jammed = True
-        elif total_vehicles >= 25:
-            is_jammed = True
 
         detected_boxes = [v.get("box") for v in getattr(self.vehicle_detector, 'last_detected_vehicles', []) if "box" in v]
         if not detected_boxes:

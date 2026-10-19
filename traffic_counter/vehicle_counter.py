@@ -483,7 +483,7 @@ class VehicleDetector:
                     cv2.LINE_AA
                 )
 
-        avg_speed_kmh = float(np.mean(active_speeds)) if active_speeds else 0.0
+        avg_speed_kmh = float(np.mean(active_speeds)) if active_speeds else None
 
         tripwire_info = {
             "total_crossed": self.tripwire_total,

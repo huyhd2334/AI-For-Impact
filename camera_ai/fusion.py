@@ -70,6 +70,14 @@ class CameraResultFusion:
             severity = FloodSeverity.NONE
             safe_for_bikes = True
             confidence = 0.35
+        elif depth_method == "automotive_dry_ground_truth":
+            # Physical certainty: Vehicles are present on the road and none have submerged tires!
+            flood_status = FloodStatus.NOT_FLOODED
+            flood_status_vn = FinalFloodStatus.NOT_FLOODED
+            severity = FloodSeverity.NONE
+            safe_for_bikes = True
+            depth_cm = None
+            confidence = 0.96
         elif not is_flooded_reason and road_water_ratio < 0.035:
             flood_status = FloodStatus.NOT_FLOODED
             flood_status_vn = FinalFloodStatus.NOT_FLOODED
@@ -98,7 +106,8 @@ class CameraResultFusion:
             safe_for_bikes = True
             confidence = round(reason_conf, 2)
 
-        # 2. Fuse Traffic Congestion Decision for Thumbnail/Snapshot (Mapping to: UNKNOWN, CLEAR, CROWDED, HEAVY_CONGESTION)
+        # 2. Fuse Traffic Congestion Decision for Thumbnail/Snapshot
+        # Distinguish Curbside Parked Vehicles vs Active Driving Corridor
         total_vehicles = int(traffic_data.get("total_vehicles", 0))
         vehicle_breakdown = traffic_data.get("breakdown", {})
         stopped_vehicles = int(traffic_data.get("stopped_vehicles", 0))
@@ -107,22 +116,72 @@ class CameraResultFusion:
         flow_vpm = float(traffic_data.get("flow_vpm", 0.0))
         is_jammed = bool(traffic_data.get("is_jammed", False))
 
-        # Calculate Road Occupancy Ratio on snapshot
         boxes = traffic_data.get("boxes", [])
-        road_pixels = int(np.count_nonzero(road_mask)) if (road_mask is not None and np.any(road_mask > 0)) else int(frame.shape[0] * frame.shape[1] * 0.40)
+        h, w = frame.shape[:2]
+        min_expected_road = int(h * w * 0.08)
+        raw_road_pixels = int(np.count_nonzero(road_mask)) if (road_mask is not None and np.any(road_mask > 0)) else 0
+        if raw_road_pixels < min_expected_road:
+            road_pixels = int(h * w * 0.38)
+            road_binary = None
+        else:
+            road_pixels = raw_road_pixels
+            road_binary = (road_mask > 0).astype(np.uint8)
+
+        curbside_parked = []
+        active_lane_vehicles = []
         total_veh_area = 0.0
+
         for b in boxes:
             if len(b) == 4:
-                bw = max(0, b[2] - b[0])
-                bh = max(0, b[3] - b[1])
-                total_veh_area += (bw * bh)
+                bx1, by1, bx2, by2 = b
+                bw_box = max(0, bx2 - bx1)
+                bh_box = max(0, by2 - by1)
+                total_veh_area += (bw_box * bh_box)
+
+                bcx = (bx1 + bx2) / 2.0
+                bcy = min(h - 1, max(0, by2))
+                is_curb = False
+
+                if road_binary is not None:
+                    row_pix = np.where(road_binary[int(bcy), :] > 0)[0]
+                    if len(row_pix) > 40:
+                        rx_min = row_pix[0]
+                        rx_max = row_pix[-1]
+                        rw = max(1, rx_max - rx_min)
+                        rel_x = (bcx - rx_min) / float(rw)
+                        # Left curb zone < 28% of road width, right curb zone > 72%
+                        if rel_x < 0.28 or rel_x > 0.72:
+                            is_curb = True
+                    else:
+                        rel_fx = bcx / float(w)
+                        if rel_fx < 0.28 or rel_fx > 0.72:
+                            is_curb = True
+                else:
+                    rel_fx = bcx / float(w)
+                    if rel_fx < 0.28 or rel_fx > 0.72:
+                        is_curb = True
+
+                if is_curb:
+                    curbside_parked.append(b)
+                else:
+                    active_lane_vehicles.append(b)
+
+        parked_count = len(curbside_parked)
+        active_count = len(active_lane_vehicles)
         road_occupancy_ratio = min(1.0, round(total_veh_area / max(1, road_pixels), 4))
+
+        # Calculate Active Corridor Occupancy (driving lane only)
+        active_veh_area = 0.0
+        for b in active_lane_vehicles:
+            active_veh_area += (max(0, b[2] - b[0]) * max(0, b[3] - b[1]))
+        active_corridor_pixels = max(10000, int(road_pixels * 0.50))
+        active_occupancy_ratio = min(1.0, round(active_veh_area / active_corridor_pixels, 4))
 
         if is_low_quality:
             traffic_status = TrafficCongestionStatus.UNKNOWN
-        elif is_jammed or road_occupancy_ratio >= 0.45 or (total_vehicles >= 20 and road_occupancy_ratio >= 0.32):
+        elif (active_count >= 10 and active_occupancy_ratio >= 0.38) or active_occupancy_ratio >= 0.48 or (is_jammed and active_count >= 5):
             traffic_status = TrafficCongestionStatus.HEAVY_CONGESTION
-        elif road_occupancy_ratio >= 0.14 or total_vehicles >= 8 or (avg_speed_kmh is not None and avg_speed_kmh < 22.0):
+        elif (active_count >= 6 and active_occupancy_ratio >= 0.18) or (avg_speed_kmh is not None and avg_speed_kmh < 20.0 and active_count >= 3):
             traffic_status = TrafficCongestionStatus.CROWDED
         else:
             traffic_status = TrafficCongestionStatus.CLEAR
@@ -130,10 +189,14 @@ class CameraResultFusion:
         # 3. Construct Unified Reasoning String
         depth_str = f", độ sâu ước tính ~{depth_cm:.1f} cm ({depth_method})" if depth_cm else ""
         spd_str = f", tốc độ TB: {avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else ""
-        occ_str = f", chiếm dụng: {int(road_occupancy_ratio * 100)}% lòng đường"
+        if parked_count > 0 and active_count <= 2:
+            traffic_desc = f"Giao thông: {traffic_status.value} (Làn chạy thông thoáng, {parked_count} xe đang đỗ dọc 2 bên lề)."
+        else:
+            traffic_desc = f"Giao thông: {traffic_status.value} ({total_vehicles} xe, chiếm dụng {int(road_occupancy_ratio*100)}% lòng đường{spd_str})."
+
         reason_text = (
             f"Trạng thái ngập: {flood_status_vn.value} ({flood_status.value.upper()}[{severity.value.upper()}]{depth_str}). "
-            f"Giao thông: {traffic_status.value} ({total_vehicles} xe{occ_str}, {stopped_vehicles} xe dừng{spd_str}). "
+            f"{traffic_desc} "
             f"{flood_reasoning.get('reason', '')}"
         )
 
@@ -186,9 +249,10 @@ class CameraResultFusion:
         )
 
         speed_text = f"{avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else "N/A"
+        traffic_hud_detail = f"(DO LE: {parked_count}, LAN CHAY: {active_count})" if parked_count > 0 else f"(OCC: {int(road_occupancy_ratio*100)}%)"
         cv2.putText(
             annotated,
-            f"GIAO THONG: {traffic_status.value} | {total_vehicles} VEH (OCC: {int(road_occupancy_ratio*100)}%) | SPD: {speed_text}",
+            f"GIAO THONG: {traffic_status.value} | {total_vehicles} VEH {traffic_hud_detail} | SPD: {speed_text}",
             (20, int(60 * hud_scale)),
             cv2.FONT_HERSHEY_SIMPLEX,
             hud_scale * 0.65,

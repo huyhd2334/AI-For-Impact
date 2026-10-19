@@ -43,8 +43,13 @@ class FloodReasoner:
 
         b64_img = self._encode_cv2_image_to_base64(img_bgr)
         prompt_text = (
-            "Bạn là chuyên gia phân tích camera giao thông đô thị và ngập lụt đường phố. "
-            "Hãy quan sát vùng mặt đường được cung cấp và xác định tình trạng ngập nước mặt đường. "
+            "Bạn là chuyên gia phân tích camera giao thông đô thị và ngập lụt đường phố.\n"
+            "Hãy quan sát vùng mặt đường được cung cấp và xác định tình trạng ngập nước mặt đường.\n"
+            "LƯU Ý CỰC KỲ QUAN TRỌNG ĐỂ TRÁNH DƯƠNG TÍNH GIẢ (FALSE POSITIVE):\n"
+            "1. Vệt ánh sáng mặt trời chiếu chói (sun glare / phản quang nắng) hoặc mặt đường nhựa chỉ hơi ẩm sau mưa KHÔNG PHẢI là ngập nước. "
+            "Nếu các vạch kẻ sơn đường (vạch vàng, vạch đi bộ, chữ viết) vẫn nhìn thấy rõ nét trên mặt đường thì mặt đường KHÔNG NGẬP (is_flooded = false, severity = 'none').\n"
+            "2. Nhìn vào lốp xe của các ô tô, xe máy đang đỗ hoặc chạy: nếu bánh xe tiếp xúc mặt đường bình thường, không bị chìm nước thì KHÔNG PHẢI ngập nước.\n"
+            "3. Chỉ đánh giá is_flooded = true khi có vũng nước sâu đọng lại, có gợn sóng nước hoặc bánh xe bị ngập chìm rõ rệt.\n"
             "Chỉ trả về kết quả theo đúng định dạng JSON Schema được yêu cầu."
         )
 
@@ -151,10 +156,21 @@ class FloodReasoner:
             specular = (s_channel < 40) & (v_channel > 220)
             water_candidates = np.uint8(specular) * 255
         else:
-            # Water reflections: low saturation, moderate-high value, smooth texture
-            water_reflection = (s_channel < 55) & (v_channel > 130)
-            smooth_surface = np.abs(laplacian) < 14
-            water_candidates = np.uint8(water_reflection & smooth_surface) * 255
+            b, g, r = frame[:, :, 0], frame[:, :, 1], frame[:, :, 2]
+            # Real water in daylight:
+            # - Sky reflection water: blue channel noticeably higher than red (b > r + 6), moderate saturation
+            # - Turbid/muddy flood water: yellowish-brown tint (H in [12, 36], S > 38, V in [45, 190])
+            # - Dark stagnant puddles: low V, smooth texture
+            is_sky_reflection = (b.astype(np.int16) > r.astype(np.int16) + 6) & (s_channel < 65) & (v_channel > 110) & (v_channel < 235)
+            is_muddy_flood = (hsv[:, :, 0] >= 12) & (hsv[:, :, 0] <= 36) & (s_channel > 38) & (v_channel > 45) & (v_channel < 190)
+            is_dark_puddle = (v_channel < 60) & (s_channel < 40) & (np.abs(laplacian) < 10)
+            
+            # Sun Glare on Asphalt: strong direct sunlight reflection (warm/greyish tint: R >= B - 4, low S, high V)
+            # This is NOT water, it is dry asphalt illuminated by direct sunlight!
+            is_sun_glare = (v_channel > 130) & (r.astype(np.int16) >= b.astype(np.int16) - 4) & (s_channel < 55)
+            
+            # Water candidates must be genuine water and NOT sun glare
+            water_candidates = np.uint8((is_sky_reflection | is_muddy_flood | is_dark_puddle) & (~is_sun_glare)) * 255
 
         # Restrict water detection strictly to the road corridor!
         water_on_road = cv2.bitwise_and(water_candidates, water_candidates, mask=road_binary)
