@@ -201,11 +201,12 @@ class UnifiedCameraAnalyzer:
         target_fps: float = 5.0,
         sample_interval_sec: float = 2.0,
         max_duration_sec: Optional[float] = None,
-        use_llm_on_alert: bool = True
+        use_llm_on_alert: bool = True,
+        output_video_path: Optional[str] = None
     ) -> List[CameraObservationEvent]:
         """
         Streams a video file through the camera analyzer pipeline.
-        Emits periodic observation events.
+        Emits periodic observation events and optionally saves an annotated output video.
         """
         cap = cv2.VideoCapture(video_source)
         if not cap.isOpened():
@@ -213,6 +214,20 @@ class UnifiedCameraAnalyzer:
 
         source_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         step_frames = max(1, int(source_fps / target_fps))
+
+        writer = None
+        if output_video_path:
+            out_p = Path(output_video_path)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            writer = cv2.VideoWriter(str(out_p), fourcc, target_fps, (width, height))
+
+        if hasattr(self.vehicle_detector, "reset"):
+            self.vehicle_detector.reset()
+        if hasattr(self.flood_reasoner, "reset_temporal_state"):
+            self.flood_reasoner.reset_temporal_state()
 
         emitted_events: List[CameraObservationEvent] = []
         frame_idx = 0
@@ -236,7 +251,7 @@ class UnifiedCameraAnalyzer:
                 is_emit_turn = (video_time_sec - last_emit_time) >= sample_interval_sec
 
                 # Analyze frame
-                event, _ = self.analyze_frame(
+                event, annotated_composite = self.analyze_frame(
                     camera_id=camera_id,
                     frame=frame,
                     timestamp=video_time_sec,
@@ -244,16 +259,22 @@ class UnifiedCameraAnalyzer:
                     save_evidence=is_emit_turn
                 )
 
+                if writer is not None:
+                    writer.write(annotated_composite)
+
                 if is_emit_turn:
                     last_emit_time = video_time_sec
                     emitted_events.append(event)
                     print(
                         f"[{camera_id} | {video_time_sec:05.1f}s] "
-                        f"Flood: {event.flood_status.value} ({event.severity.value}) | "
-                        f"Traffic: {event.traffic_status.value} ({event.total_vehicles} veh, spd={event.avg_speed_kmh} km/h)"
+                        f"Flood: {event.flood_status_vn.value} ({event.flood_status.value.upper()}) | "
+                        f"Traffic: {event.traffic_status.value} ({event.total_vehicles} veh)"
                     )
         finally:
             cap.release()
+            if writer is not None:
+                writer.release()
+                print(f"[+] Output video saved successfully: {output_video_path}")
 
         return emitted_events
 

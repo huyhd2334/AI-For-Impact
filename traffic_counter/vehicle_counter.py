@@ -84,6 +84,17 @@ class VehicleDetector:
             print(f"[VehicleDetector] Failed to load model ({e}). Using OpenCV Background Subtractor fallback.")
             self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=True)
 
+    def reset(self):
+        """Reset all tracking, heatmap and tripwire state for a fresh video or stream."""
+        self.track_history.clear()
+        self.heatmap_acc = None
+        self.tripwire_total = 0
+        self.tripwire_breakdown.clear()
+        self.crossing_timestamps.clear()
+        self.recent_crossings.clear()
+        self.tripwire_start_time = None
+        self.flow_vpm = 0.0
+
     @staticmethod
     def _calc_iou_ios(boxA: Tuple[int, int, int, int], boxB: Tuple[int, int, int, int]) -> Tuple[float, float]:
         xA = max(boxA[0], boxB[0])
@@ -455,8 +466,8 @@ class VehicleDetector:
             surviving_crossings = []
             for rx, ry, rt in self.recent_crossings:
                 dt = timestamp - rt
-                if dt < 1.0:
-                    rad = int((1.0 + dt * 2.5) * trip_thick * 2.2)
+                if 0.0 <= dt < 1.0:
+                    rad = max(1, int((1.0 + dt * 2.5) * trip_thick * 2.2))
                     cv2.circle(annotated_frame, (rx, ry), rad, (0, 255, 255), 2, cv2.LINE_AA)
                     surviving_crossings.append((rx, ry, rt))
             self.recent_crossings = surviving_crossings

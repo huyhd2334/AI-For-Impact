@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--image", type=str, default=None, help="Path to single test frame")
     parser.add_argument("--video", type=str, default=None, help="Path to test video")
     parser.add_argument("--fps", type=float, default=5.0, help="Target FPS for video processing")
+    parser.add_argument("--out-video", type=str, default=None, help="Path to save annotated output video (e.g. outputs/result.mp4)")
     parser.add_argument("--calibrate", action="store_true", help="Only run road mask calibration and exit")
     parser.add_argument("--force-calibrate", action="store_true", help="Force recalculation of cached road mask")
     parser.add_argument("--no-llm", action="store_true", help="Disable Gemini Flash reasoning (use local CV only)")
@@ -74,15 +75,24 @@ def main():
             sys.exit(1)
 
         print(f"[*] Processing video {args.video} at {args.fps} FPS for camera {args.camera_id}...")
+        out_vid = args.out_video
+        if not out_vid:
+            out_dir = Path("outputs")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_vid = str(out_dir / f"result_{vid_path.stem}.mp4")
+
         events = analyzer.process_video(
             camera_id=args.camera_id,
             video_source=str(vid_path),
             target_fps=args.fps,
-            sample_interval_sec=2.0
+            sample_interval_sec=2.0,
+            use_llm_on_alert=not args.no_llm,
+            output_video_path=out_vid
         )
         print(f"\n[+] Video processing finished. Total observation events emitted: {len(events)}")
         if events:
             print(f"Latest state: Flood={events[-1].flood_status_vn.value} | Traffic={events[-1].traffic_status.value}")
+        print(f"[+] Output video is ready at: {out_vid}")
         return
 
     # If no argument, print help
