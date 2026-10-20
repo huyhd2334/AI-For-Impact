@@ -26,6 +26,13 @@ class FloodReasoner:
     def __init__(self, api_key: Optional[str] = None, default_model: str = "gemini-2.5-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.default_model = default_model
+        self._temporal_ratios: Dict[str, float] = {}
+
+    def reset_temporal_state(self, camera_id: Optional[str] = None):
+        if camera_id:
+            self._temporal_ratios.pop(camera_id, None)
+        else:
+            self._temporal_ratios.clear()
 
     def _encode_cv2_image_to_base64(self, img_bgr: np.ndarray, quality: int = 85) -> str:
         encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
@@ -142,35 +149,36 @@ class FloodReasoner:
             road_pixel_count = int(np.sum(road_binary))
 
         # Color & texture feature extraction
+        b, g, r = frame[:, :, 0], frame[:, :, 1], frame[:, :, 2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         s_channel = hsv[:, :, 1]
         v_channel = hsv[:, :, 2]
         laplacian = cv2.Laplacian(gray, cv2.CV_64F)
 
-        # Ambient brightness estimation
-        ambient_brightness = float(np.mean(v_channel))
-        is_night = ambient_brightness < 70.0
+        # Ambient brightness estimation from upper sky / horizon
+        ambient_brightness = float(np.mean(frame[:max(1, int(h * 0.35)), :, :]))
+        is_night = ambient_brightness < 48.0
 
         if is_night:
-            specular = (s_channel < 40) & (v_channel > 220)
-            water_candidates = np.uint8(specular) * 255
+            # Night water surface: Streetlights & vehicle headlights specular reflections and murky wet spread
+            night_water = (v_channel > 50) & (s_channel < 160) & (b.astype(int) + g.astype(int) + r.astype(int) > 120) & (v_channel < 252)
+            water_candidates = np.uint8(night_water) * 255
         else:
-            b, g, r = frame[:, :, 0], frame[:, :, 1], frame[:, :, 2]
             # Real water in daylight:
-            # - Sky reflection water: blue channel noticeably higher than red (b > r + 6), moderate saturation
-            # - Turbid/muddy flood water: yellowish-brown tint (H in [12, 36], S > 38, V in [45, 190])
-            # - Dark stagnant puddles: low V, smooth texture
-            is_sky_reflection = (b.astype(np.int16) > r.astype(np.int16) + 6) & (s_channel < 65) & (v_channel > 110) & (v_channel < 235)
-            is_muddy_flood = (hsv[:, :, 0] >= 12) & (hsv[:, :, 0] <= 36) & (s_channel > 38) & (v_channel > 45) & (v_channel < 190)
-            is_dark_puddle = (v_channel < 60) & (s_channel < 40) & (np.abs(laplacian) < 10)
+            # - Sky reflection water: blue channel noticeably higher than red, moderate saturation
+            is_sky_reflection = (b.astype(np.int16) > r.astype(np.int16) + 3) & (s_channel < 75) & (v_channel > 70) & (v_channel < 240)
+            # - Whitewater waves / wake / splash foam around moving tires in water
+            is_whitewater_splash = (v_channel > 135) & (s_channel < 55) & (np.abs(laplacian) > 18)
+            # - Deep dark puddles / gutter water
+            is_dark_puddle = (v_channel < 55) & (s_channel < 40) & (np.abs(laplacian) < 8)
+            # - High-saturation specular puddles (e.g. sunset/dusk puddle reflecting buildings/lights)
+            is_specular_puddle = (s_channel > 95) & (v_channel > 75) & (np.abs(laplacian) > 10)
             
-            # Sun Glare on Asphalt: strong direct sunlight reflection (warm/greyish tint: R >= B - 4, low S, high V)
-            # This is NOT water, it is dry asphalt illuminated by direct sunlight!
-            is_sun_glare = (v_channel > 130) & (r.astype(np.int16) >= b.astype(np.int16) - 4) & (s_channel < 55)
+            # Sun Glare on Asphalt: warm tint (R >= B - 2, low S, high V, asphalt texture)
+            is_sun_glare = (v_channel > 115) & (r.astype(np.int16) >= b.astype(np.int16) - 2) & (s_channel < 50) & (~is_whitewater_splash)
             
-            # Water candidates must be genuine water and NOT sun glare
-            water_candidates = np.uint8((is_sky_reflection | is_muddy_flood | is_dark_puddle) & (~is_sun_glare)) * 255
+            water_candidates = np.uint8((is_sky_reflection | is_whitewater_splash | is_dark_puddle | is_specular_puddle) & (~is_sun_glare)) * 255
 
         # Restrict water detection strictly to the road corridor!
         water_on_road = cv2.bitwise_and(water_candidates, water_candidates, mask=road_binary)
@@ -188,24 +196,24 @@ class FloodReasoner:
                 "is_flooded": False,
                 "severity": "none",
                 "safe_for_bikes": True,
-                "confidence": 0.94,
+                "confidence": 0.95,
                 "reason": f"Mặt đường khô ráo, không phát hiện đọng nước ngập ({road_water_ratio*100:.1f}% diện tích mặt đường).",
             }
-        elif road_water_ratio < 0.12:
+        elif road_water_ratio < 0.18:
             res = {
                 "is_flooded": True,
                 "severity": "minor",
                 "safe_for_bikes": True,
                 "confidence": float(min(0.92, 0.75 + road_water_ratio * 1.5)),
-                "reason": f"Có nước xâm xấp / đọng nước cục bộ bao phủ {road_water_ratio*100:.1f}% mặt đường.",
+                "reason": f"Có nước xâm xấp / đọng nước cục bộ bao phủ {road_water_ratio*100:.1f}% mặt đường (mép/rãnh đường, xe máy đi được an toàn).",
             }
-        elif road_water_ratio < 0.28:
+        elif road_water_ratio < 0.45:
             res = {
                 "is_flooded": True,
                 "severity": "moderate",
                 "safe_for_bikes": False,
                 "confidence": float(min(0.95, 0.82 + road_water_ratio)),
-                "reason": f"Ngập nước vừa bao phủ {road_water_ratio*100:.1f}% hành lang đường, ảnh hưởng phương tiện.",
+                "reason": f"Ngập nước vừa bao phủ {road_water_ratio*100:.1f}% hành lang đường, ô tô lội nước tạo sóng, xe máy cần thận trọng.",
             }
         else:
             res = {
@@ -213,7 +221,7 @@ class FloodReasoner:
                 "severity": "severe",
                 "safe_for_bikes": False,
                 "confidence": float(min(0.98, 0.88 + road_water_ratio * 0.3)),
-                "reason": f"Ngập sâu diện rộng bao phủ {road_water_ratio*100:.1f}% toàn bộ lòng đường, nguy hiểm.",
+                "reason": f"Ngập sâu diện rộng bao phủ {road_water_ratio*100:.1f}% toàn bộ lòng đường, nước ngập sâu bánh xe nguy hiểm.",
             }
 
         return res, cleaned_water_mask, road_water_ratio
@@ -259,7 +267,8 @@ class FloodReasoner:
         frame: np.ndarray, 
         road_mask: np.ndarray, 
         use_llm: bool = True,
-        source_hint: str = ""
+        source_hint: str = "",
+        camera_id: str = "default"
     ) -> Tuple[Dict[str, Any], np.ndarray, float]:
         """
         Executes flood reasoning.
@@ -269,7 +278,35 @@ class FloodReasoner:
             road_water_ratio: float
         """
         # Always run local CV within the road mask for pixel-level water statistics
-        cv_res, water_mask, road_water_ratio = self._local_cv_road_reasoning(frame, road_mask)
+        cv_res, water_mask, raw_water_ratio = self._local_cv_road_reasoning(frame, road_mask)
+
+        # Apply temporal smoothing / peak retention per camera
+        prev_ratio = self._temporal_ratios.get(camera_id, 0.0)
+        # Slow decay (0.95 factor) so passing vehicles temporarily occluding water don't reset puddle status
+        road_water_ratio = max(raw_water_ratio, prev_ratio * 0.95)
+        self._temporal_ratios[camera_id] = road_water_ratio
+
+        # Update severity if temporal smoothing retained valid water
+        if road_water_ratio < 0.035:
+            cv_res["is_flooded"] = False
+            cv_res["severity"] = "none"
+            cv_res["safe_for_bikes"] = True
+            cv_res["reason"] = f"Mặt đường khô ráo, không phát hiện đọng nước ngập ({road_water_ratio*100:.1f}% diện tích mặt đường)."
+        elif road_water_ratio < 0.18:
+            cv_res["is_flooded"] = True
+            cv_res["severity"] = "minor"
+            cv_res["safe_for_bikes"] = True
+            cv_res["reason"] = f"Có nước xâm xấp / đọng nước cục bộ bao phủ {road_water_ratio*100:.1f}% mặt đường (mép/rãnh đường, xe máy đi được an toàn)."
+        elif road_water_ratio < 0.45:
+            cv_res["is_flooded"] = True
+            cv_res["severity"] = "moderate"
+            cv_res["safe_for_bikes"] = False
+            cv_res["reason"] = f"Ngập nước vừa bao phủ {road_water_ratio*100:.1f}% hành lang đường, ô tô lội nước tạo sóng, xe máy cần thận trọng."
+        else:
+            cv_res["is_flooded"] = True
+            cv_res["severity"] = "severe"
+            cv_res["safe_for_bikes"] = False
+            cv_res["reason"] = f"Ngập sâu diện rộng bao phủ {road_water_ratio*100:.1f}% toàn bộ lòng đường, nước ngập sâu bánh xe nguy hiểm."
 
         # 1. If LLM reasoning requested and API key available -> call Google Gemini Flash API
         if use_llm and self.api_key:

@@ -34,7 +34,7 @@ class UnifiedCameraAnalyzer:
     def __init__(
         self,
         gemini_api_key: Optional[str] = None,
-        road_model_type: str = "twinlite",
+        road_model_type: str = "b0",
         vehicle_model_name: str = "vn_traffic_surveillance.pt",
         cache_dir: Optional[str] = None,
         evidence_dir: Optional[str] = None
@@ -98,14 +98,16 @@ class UnifiedCameraAnalyzer:
 
         stopped_vehicles = tripwire_info.get("stopped_vehicles", 0)
         slow_vehicles = tripwire_info.get("slow_vehicles", 0)
+        parked_vehicles = tripwire_info.get("parked_vehicles", 0)
+        active_vehicles = tripwire_info.get("active_vehicles", 0)
         flow_vpm = tripwire_info.get("flow_vpm", 0.0)
 
-        # Intelligent Multi-factor Congestion Analysis (speed & movement based on active video tracking)
+        # Intelligent Multi-factor Congestion Analysis on active moving traffic only
         is_jammed = False
         speed_measured_count = tripwire_info.get("speed_measured_count", 0)
-        if avg_speed_kmh is not None and speed_measured_count >= 3 and avg_speed_kmh < 15.0 and total_vehicles >= 10:
-            slow_or_stopped = (stopped_vehicles + slow_vehicles) / float(max(1, total_vehicles))
-            if slow_or_stopped >= 0.35 or avg_speed_kmh < 8.0:
+        if avg_speed_kmh is not None and speed_measured_count >= 2 and avg_speed_kmh < 12.0 and active_vehicles >= 6:
+            slow_or_stopped = (stopped_vehicles + slow_vehicles) / float(max(1, active_vehicles))
+            if slow_or_stopped >= 0.45 or avg_speed_kmh < 6.0:
                 is_jammed = True
 
         detected_boxes = [v.get("box") for v in getattr(self.vehicle_detector, 'last_detected_vehicles', []) if "box" in v]
@@ -114,6 +116,8 @@ class UnifiedCameraAnalyzer:
 
         traffic_data = {
             "total_vehicles": total_vehicles,
+            "active_vehicles": active_vehicles,
+            "parked_vehicles": parked_vehicles,
             "breakdown": breakdown,
             "stopped_vehicles": stopped_vehicles,
             "slow_vehicles": slow_vehicles,
@@ -129,7 +133,8 @@ class UnifiedCameraAnalyzer:
             frame=frame,
             road_mask=road_mask,
             use_llm=use_llm,
-            source_hint=source_hint
+            source_hint=source_hint,
+            camera_id=camera_id
         )
         flood_reasoning["road_water_ratio"] = road_water_ratio
         flood_reasoning["water_mask"] = water_mask

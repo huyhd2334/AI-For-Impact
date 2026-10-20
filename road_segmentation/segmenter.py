@@ -84,7 +84,7 @@ class RoadSegmenter:
 
     def _init_segformer(self):
         from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
-        hf_id = self.SUPPORTED_MODELS.get(self.model_type, self.SUPPORTED_MODELS["b2"])
+        hf_id = self.SUPPORTED_MODELS.get(self.model_type, self.SUPPORTED_MODELS["b0"])
         print(f"[RoadSegmenter] Loading SegFormer: {hf_id} on {self.device}...")
         self.processor = SegformerImageProcessor.from_pretrained(hf_id)
         self.model = SegformerForSemanticSegmentation.from_pretrained(hf_id).to(self.device).eval()
@@ -253,10 +253,42 @@ class RoadSegmenter:
         sidewalk = (pred == 1)
 
         if self.enable_corridor_fusion:
-            vehicles = np.isin(pred, [11, 12, 13, 14, 15, 17, 18])
-            corridor = road | vehicles
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
-            road = cv2.morphologyEx(corridor.astype(np.uint8), cv2.MORPH_CLOSE, kernel) > 0
+            # Dynamic objects on the roadway
+            dynamic_objects = np.isin(pred, [11, 12, 13, 14, 15, 17, 18])
+
+            # Ground level: below horizon line (lower 60% of frame)
+            ground_y = int(orig_h * 0.40)
+            ground_mask = np.zeros((orig_h, orig_w), dtype=bool)
+            ground_mask[ground_y:, :] = True
+
+            # Basic corridor
+            # Detect ground-level specular reflections (puddles / flood water reflections)
+            hsv_infer = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            water_surface_refl = (hsv_infer[:, :, 1] > 90) & (hsv_infer[:, :, 2] > 70) & ground_mask & (~np.isin(pred, [10]))
+            corridor = (road | sidewalk | dynamic_objects | water_surface_refl) & ground_mask
+
+            # In flood/wet scenes where water reflections break the road segmentation:
+            # If segmented road is sparse, include ground regions between buildings that aren't sky
+            if np.mean(corridor) < 0.12:
+                non_building_ground = ground_mask & (~np.isin(pred, [2, 10]))
+                corridor = corridor | (non_building_ground & np.isin(pred, [0, 1, 3, 4, 8, 9, 13, 14, 15]))
+
+            # Horizontal morphological closing to bridge across water puddles and lane markings
+            kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (45, 15))
+            closed_corridor = cv2.morphologyEx(corridor.astype(np.uint8), cv2.MORPH_CLOSE, kernel_h)
+
+            # Filter out tiny noise blobs, keep significant road components
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_corridor)
+            road_final = np.zeros_like(closed_corridor)
+            min_area = orig_h * orig_w * 0.02
+            for lbl in range(1, num_labels):
+                if stats[lbl, cv2.CC_STAT_AREA] >= min_area:
+                    road_final[labels == lbl] = 1
+
+            if np.count_nonzero(road_final) > 0:
+                road = (road_final > 0)
+            else:
+                road = (closed_corridor > 0)
 
         return road.astype(np.uint8) * 255, sidewalk.astype(np.uint8) * 255
 

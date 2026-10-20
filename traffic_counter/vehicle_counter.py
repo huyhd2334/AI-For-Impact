@@ -125,6 +125,8 @@ class VehicleDetector:
         active_speeds = []
         stopped_vehicles = 0
         slow_vehicles = 0
+        parked_vehicles = 0
+        active_vehicles_count = 0
 
         if self.use_yolo and self.yolo_model:
             raw_vehicles = []
@@ -369,11 +371,27 @@ class VehicleDetector:
                     is_vehicle_stopped = False
 
                 td_curr = self.track_details[tid_show]
+                start_x, start_y = td_curr['start_pos']
+                total_disp = math.hypot(cx - start_x, cy - start_y)
+                track_duration = timestamp - td_curr['start_t']
+                hit_count = td_curr.get('hit_count', 1)
 
-                if is_vehicle_stopped or (speed_kmh is not None and speed_kmh == 0.0):
-                    stopped_vehicles += 1
-                elif speed_kmh is not None and speed_kmh < 12.0:
-                    slow_vehicles += 1
+                # Determine if vehicle is PARKED vs actively traveling
+                is_parked = (track_duration >= 0.4 and total_disp < 12.0) or (hit_count >= 3 and total_disp < 8.0) or (total_disp < 4.0 and hit_count >= 2)
+                if td_curr.get('is_parked', False) and total_disp < 20.0:
+                    is_parked = True
+                td_curr['is_parked'] = is_parked
+
+                if is_parked:
+                    parked_vehicles += 1
+                    speed_kmh = None
+                    is_vehicle_stopped = False
+                else:
+                    active_vehicles_count += 1
+                    if is_vehicle_stopped or (speed_kmh is not None and speed_kmh == 0.0):
+                        stopped_vehicles += 1
+                    elif speed_kmh is not None and speed_kmh < 12.0:
+                        slow_vehicles += 1
 
                 # Check virtual tripwire crossing
                 prev_y = td_curr.get('prev_pos', (cx, cy))[1]
@@ -390,10 +408,12 @@ class VehicleDetector:
                 else:
                     breakdown[cname] = 1
                 total_count += 1
-                if speed_kmh is not None:
+
+                # Only moving vehicles contribute to active average speed
+                if not is_parked and speed_kmh is not None and speed_kmh > 0.0:
                     active_speeds.append(speed_kmh)
 
-                active_render_vehicles.append((x1, y1, x2, y2, cname, tid_show, speed_kmh))
+                active_render_vehicles.append((x1, y1, x2, y2, cname, tid_show, speed_kmh, is_parked))
 
             # Compute flow rate (Vehicles Per Minute - VPM)
             if self.tripwire_start_time is None:
@@ -473,22 +493,25 @@ class VehicleDetector:
             self.recent_crossings = surviving_crossings
 
             # Render bounding boxes and tracking IDs
-            for (x1, y1, x2, y2, cname, tid_show, speed_kmh) in active_render_vehicles:
-                color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
-                
-                if speed_kmh is not None:
-                    spd_str = f" | {int(speed_kmh)}km/h" if speed_kmh > 0 else " | 0km/h"
+            for (x1, y1, x2, y2, cname, tid_show, speed_kmh, is_parked) in active_render_vehicles:
+                if is_parked:
+                    color = (160, 160, 160)
+                    label = f"#{tid_show} {cname} [PARKED]"
                 else:
-                    spd_str = ""
-                label = f"#{tid_show} {cname}{spd_str}"
-                
+                    color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
+                    if speed_kmh is not None:
+                        spd_str = f" | {int(speed_kmh)}km/h" if speed_kmh > 0 else " | 0km/h"
+                    else:
+                        spd_str = ""
+                    label = f"#{tid_show} {cname}{spd_str}"
+
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
                 cv2.putText(
                     annotated_frame, 
                     label, 
                     (x1, max(y1 - 8, int(18 * font_scale))), 
                     cv2.FONT_HERSHEY_SIMPLEX, 
-                    font_scale, 
+                    font_scale * 0.9, 
                     color, 
                     font_thick, 
                     cv2.LINE_AA
@@ -502,6 +525,8 @@ class VehicleDetector:
             "breakdown": self.tripwire_breakdown,
             "stopped_vehicles": stopped_vehicles,
             "slow_vehicles": slow_vehicles,
+            "parked_vehicles": parked_vehicles,
+            "active_vehicles": active_vehicles_count,
             "speed_measured_count": len(active_speeds)
         }
 

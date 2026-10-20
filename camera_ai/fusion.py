@@ -70,35 +70,25 @@ class CameraResultFusion:
             severity = FloodSeverity.NONE
             safe_for_bikes = True
             confidence = 0.35
-        elif depth_method == "automotive_dry_ground_truth":
-            # Physical certainty: Vehicles are present on the road and none have submerged tires!
+        elif not is_flooded_reason or road_water_ratio < 0.035 or reason_severity == "none":
             flood_status = FloodStatus.NOT_FLOODED
             flood_status_vn = FinalFloodStatus.NOT_FLOODED
             severity = FloodSeverity.NONE
             safe_for_bikes = True
             depth_cm = None
-            confidence = 0.96
-        elif not is_flooded_reason and road_water_ratio < 0.035:
-            flood_status = FloodStatus.NOT_FLOODED
-            flood_status_vn = FinalFloodStatus.NOT_FLOODED
-            severity = FloodSeverity.NONE
-            safe_for_bikes = True
             confidence = max(0.92, reason_conf)
-        elif reason_conf >= 0.70 or road_water_ratio >= 0.08:
+        elif (reason_severity == "severe" and road_water_ratio >= 0.35) or (depth_cm is not None and depth_cm >= 32.0 and road_water_ratio >= 0.30) or road_water_ratio >= 0.45:
             flood_status = FloodStatus.FLOODED
-            confidence = min(0.98, max(reason_conf, depth_conf or 0.80))
-            if (depth_cm is not None and depth_cm >= 25.0) or road_water_ratio >= 0.25 or reason_severity == "severe":
-                severity = FloodSeverity.SEVERE
-                safe_for_bikes = False
-                flood_status_vn = FinalFloodStatus.HEAVY_FLOOD
-            elif (depth_cm is not None and depth_cm >= 15.0) or road_water_ratio >= 0.12 or reason_severity == "moderate":
-                severity = FloodSeverity.MODERATE
-                safe_for_bikes = False
-                flood_status_vn = FinalFloodStatus.HEAVY_FLOOD
-            else:
-                severity = FloodSeverity.MINOR
-                safe_for_bikes = bool(flood_reasoning.get("safe_for_bikes", True))
-                flood_status_vn = FinalFloodStatus.PASSABLE_FLOOD
+            severity = FloodSeverity.SEVERE
+            safe_for_bikes = False
+            flood_status_vn = FinalFloodStatus.HEAVY_FLOOD
+            confidence = min(0.98, max(reason_conf, depth_conf or 0.85))
+        elif reason_severity in ["moderate", "minor"] or (depth_cm is not None and depth_cm >= 5.0) or road_water_ratio >= 0.035:
+            flood_status = FloodStatus.FLOODED
+            severity = FloodSeverity.MODERATE if (road_water_ratio >= 0.18 or (depth_cm and depth_cm >= 18.0)) else FloodSeverity.MINOR
+            safe_for_bikes = (severity == FloodSeverity.MINOR)
+            flood_status_vn = FinalFloodStatus.PASSABLE_FLOOD
+            confidence = min(0.95, max(reason_conf, depth_conf or 0.80))
         else:
             flood_status = FloodStatus.UNCERTAIN
             flood_status_vn = FinalFloodStatus.UNKNOWN
@@ -166,8 +156,14 @@ class CameraResultFusion:
                 else:
                     active_lane_vehicles.append(b)
 
-        parked_count = len(curbside_parked)
-        active_count = len(active_lane_vehicles)
+        # Prioritize tracking-level parked vs active vehicle classification
+        if "parked_vehicles" in traffic_data and "active_vehicles" in traffic_data:
+            parked_count = int(traffic_data["parked_vehicles"])
+            active_count = int(traffic_data["active_vehicles"])
+        else:
+            parked_count = len(curbside_parked)
+            active_count = len(active_lane_vehicles)
+
         road_occupancy_ratio = min(1.0, round(total_veh_area / max(1, road_pixels), 4))
 
         # Calculate Active Corridor Occupancy (driving lane only)
@@ -179,9 +175,9 @@ class CameraResultFusion:
 
         if is_low_quality:
             traffic_status = TrafficCongestionStatus.UNKNOWN
-        elif (active_count >= 10 and active_occupancy_ratio >= 0.38) or active_occupancy_ratio >= 0.48 or (is_jammed and active_count >= 5):
+        elif is_jammed and active_count >= 6 and (avg_speed_kmh is not None and avg_speed_kmh < 8.0):
             traffic_status = TrafficCongestionStatus.HEAVY_CONGESTION
-        elif (active_count >= 6 and active_occupancy_ratio >= 0.18) or (avg_speed_kmh is not None and avg_speed_kmh < 20.0 and active_count >= 3):
+        elif (active_count >= 8 and active_occupancy_ratio >= 0.30) or (is_jammed and active_count >= 4) or (avg_speed_kmh is not None and avg_speed_kmh < 14.0 and active_count >= 7):
             traffic_status = TrafficCongestionStatus.CROWDED
         else:
             traffic_status = TrafficCongestionStatus.CLEAR
@@ -189,10 +185,10 @@ class CameraResultFusion:
         # 3. Construct Unified Reasoning String
         depth_str = f", độ sâu ước tính ~{depth_cm:.1f} cm ({depth_method})" if depth_cm else ""
         spd_str = f", tốc độ TB: {avg_speed_kmh:.1f} km/h" if avg_speed_kmh is not None else ""
-        if parked_count > 0 and active_count <= 2:
-            traffic_desc = f"Giao thông: {traffic_status.value} (Làn chạy thông thoáng, {parked_count} xe đang đỗ dọc 2 bên lề)."
+        if parked_count > 0:
+            traffic_desc = f"Giao thông: {traffic_status.value} ({active_count} xe đang chạy, {parked_count} xe đang đỗ lề/bãi{spd_str})."
         else:
-            traffic_desc = f"Giao thông: {traffic_status.value} ({total_vehicles} xe, chiếm dụng {int(road_occupancy_ratio*100)}% lòng đường{spd_str})."
+            traffic_desc = f"Giao thông: {traffic_status.value} ({total_vehicles} xe lưu thông{spd_str})."
 
         reason_text = (
             f"Trạng thái ngập: {flood_status_vn.value} ({flood_status.value.upper()}[{severity.value.upper()}]{depth_str}). "

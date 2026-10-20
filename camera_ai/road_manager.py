@@ -14,7 +14,7 @@ class RoadMaskManager:
     Implements: Frame chuẩn -> Road segmentation -> road_mask (lưu để tái sử dụng).
     """
 
-    def __init__(self, cache_dir: Optional[str] = None, model_type: str = "twinlite"):
+    def __init__(self, cache_dir: Optional[str] = None, model_type: str = "b0"):
         curr_dir = Path(__file__).resolve().parent
         self.cache_dir = Path(cache_dir) if cache_dir else curr_dir.parent / "road_segmentation" / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)

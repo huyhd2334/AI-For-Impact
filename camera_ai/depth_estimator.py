@@ -73,23 +73,27 @@ class WaterDepthEstimator:
             ratio = deepest_v["submersion_ratio"]
 
             if cname in ["motorcycle", "bicycle"]:
-                if ratio > 0.65:
-                    depth_cm = round(32.0 + ratio * 15.0, 1)
+                if ratio > 0.65 and road_water_ratio >= 0.25:
+                    depth_cm = round(30.0 + ratio * 15.0, 1)
                     desc = "Bánh xe máy ngập sâu qua trục bánh xe."
                     conf = 0.88
                 else:
-                    depth_cm = round(12.0 + ratio * 16.0, 1)
-                    desc = "Nước ngập nửa bánh xe máy / chạm mép vành."
+                    depth_cm = round(8.0 + ratio * 8.0, 1)
+                    desc = "Nước ngập quanh lốp xe máy / mép rãnh."
                     conf = 0.85
             else: # car, bus, truck
-                if ratio > 0.70:
-                    depth_cm = round(40.0 + ratio * 20.0, 1)
+                if ratio > 0.65 and road_water_ratio >= 0.35:
+                    depth_cm = round(38.0 + ratio * 22.0, 1)
                     desc = "Nước ngập qua gầm ô tô, chạm cản trước."
                     conf = 0.90
-                else:
-                    depth_cm = round(18.0 + ratio * 18.0, 1)
+                elif ratio > 0.35 and road_water_ratio >= 0.18:
+                    depth_cm = round(16.0 + ratio * 12.0, 1)
                     desc = "Nước ngập quanh lốp ô tô, chưa chạm gầm."
-                    conf = 0.84
+                    conf = 0.85
+                else:
+                    depth_cm = round(6.0 + ratio * 8.0, 1)
+                    desc = "Lốp ô tô lăn qua vệt nước mép đường."
+                    conf = 0.82
 
             return {
                 "water_depth_cm": depth_cm,
@@ -99,39 +103,32 @@ class WaterDepthEstimator:
                 "depth_description": f"[Độ sâu mốc xe] {desc} (~{depth_cm:.1f} cm)"
             }
 
-        # Physical Constraint: If vehicles are present on the road, and NONE of them show tire submersion,
-        # then the road CANNOT be significantly flooded! Ground truth from tires proves pavement is dry/damp only.
-        if detected_vehicles and len(detected_vehicles) >= 2 and len(vehicles_in_water) == 0:
+        # 3. Geometric & Coverage-based Depth Estimation
+        if road_water_ratio < 0.035:
             return {
                 "water_depth_cm": None,
                 "depth_confidence": 0.95,
-                "depth_method": "automotive_dry_ground_truth",
+                "depth_method": "none",
                 "is_depth_credible": True,
-                "depth_description": "Không có ngập sâu (bánh xe các phương tiện trên đường tiếp xúc mặt đất khô ráo, không bị chìm nước)."
+                "depth_description": "Không có ngập (mặt đường khô ráo)."
             }
-
-        # 3. Geometric Planar Inundation Estimation (when no vehicle directly submerged)
-        if road_water_ratio < 0.10:
-            depth_cm = round(4.0 + road_water_ratio * 40.0, 1)
-            conf = 0.68
-            desc = "Nước đọng xâm xấp mép đường."
-        elif road_water_ratio < 0.25:
-            depth_cm = round(10.0 + road_water_ratio * 45.0, 1)
-            conf = 0.74
-            desc = "Nước ngập vừa, loang rộng trên mặt đường."
-        elif road_water_ratio < 0.50:
-            depth_cm = round(22.0 + road_water_ratio * 35.0, 1)
-            conf = 0.78
-            desc = "Ngập sâu trên phần lớn diện tích lòng đường."
-        else:
-            depth_cm = round(40.0 + road_water_ratio * 25.0, 1)
+        elif road_water_ratio < 0.18:
+            depth_cm = round(5.0 + (road_water_ratio - 0.035) / 0.145 * 8.0, 1)
             conf = 0.82
-            desc = "Ngập sâu nghiêm trọng toàn bộ hành lang đường."
+            desc = "Nước đọng xâm xấp mép/rãnh đường, xe máy đi được an toàn."
+        elif road_water_ratio < 0.45:
+            depth_cm = round(15.0 + (road_water_ratio - 0.18) / 0.27 * 12.0, 1)
+            conf = 0.86
+            desc = "Nước ngập vừa, tràn vào lòng đường, ô tô lội nước tạo sóng."
+        else:
+            depth_cm = round(32.0 + min(1.0, (road_water_ratio - 0.45) / 0.35) * 18.0, 1)
+            conf = 0.92
+            desc = "Ngập sâu nghiêm trọng toàn bộ lòng đường, nguy hiểm."
 
         return {
             "water_depth_cm": depth_cm,
             "depth_confidence": conf,
             "depth_method": "geometric_water_coverage",
-            "is_depth_credible": conf >= 0.70,
+            "is_depth_credible": True,
             "depth_description": f"[Ước lượng diện tích ngập] {desc} (~{depth_cm:.1f} cm)"
         }
