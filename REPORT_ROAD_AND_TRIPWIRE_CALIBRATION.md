@@ -1,18 +1,16 @@
-# BÁO CÁO NÂNG CẤP HỆ THỐNG: ROAD ROI & MULTI-BRANCH TRIPWIRES ROUTER & SOTA FLOOD SEGMENTATION
-**SafeRoute AI Surveillance Engine**  
 *Cập nhật: 21/10/2026*
 
 ---
 
-## 1. TỔNG QUAN CÁC CẢI TIẾN ĐÃ HOÀN TẤT
+## 1. TỔNG QUAN
 
 ### 1.1. Khắc phục hạn chế của mô hình tự động phân đoạn mặt đường
-- **Vấn đề ban đầu**: Khi camera cố định giám sát đường phố ngập nước, mô hình SegFormer tự động bị nhiễu bởi phản xạ bầu trời và bóng râm, tự ý lấn viền mặt đường lên tường nhà, bậc thềm đá, lan can hiên nhà và bãi đỗ xe.
+- **Vấn đề**: Khi camera cố định giám sát đường phố ngập nước, mô hình SegFormer tự động bị nhiễu bởi phản xạ bầu trời và bóng râm, tự ý lấn viền mặt đường lên tường nhà, bậc thềm đá, lan can hiên nhà và bãi đỗ xe.
 - **Giải pháp**: 
-  - Triển khai cơ chế **Pre-segmentation (Tiền phân đoạn hành lang mặt đường)** chuẩn xác cho các camera cố định.
+  - Triển khai: Pre-segmentation (Tiền phân đoạn hành lang mặt đường) chuẩn xác cho các camera cố định.
   - Cho phép người vận hành vẽ polygon khép kín ôm sát lòng đường xe chạy thực tế.
   - Tự động sinh dải đệm bó vỉa hè (`sidewalk_mask`) để phục vụ thuật toán ước lượng độ sâu ngập tầng 3 (Curb Inundation).
-  - Tái sử dụng siêu tốc không mất thời gian inference: `ROAD MASK: REUSED_CACHE (0ms)`.
+  - Tái sử dụng không mất thời gian inference: `ROAD MASK: REUSED_CACHE (0ms)`.
 
 ### 1.2. Đường ranh giới đếm xe đa nhánh (Multi-Branch Tripwires)
 - **Vấn đề ban đầu**: Hệ thống chỉ hỗ trợ 1 đường cắt ngang cố định trên toàn bộ khung hình, không hỗ trợ các ngã rẽ hoặc nhiều luồng giao thông độc lập.
@@ -22,7 +20,7 @@
   - Đếm và hiển thị trực quan riêng biệt cho từng nhánh: `[Nhánh 1: X veh]`, `[Nhánh 2: Y veh]`,... đi kèm hiệu ứng chớp sáng tại toạ độ giao cắt.
 
 ### 1.3. Nâng cấp mô hình phân đoạn ngập nước SOTA
-- **Vấn đề ban đầu**: Màng nước hiển thị bị đứt đoạn, lốm đốm lỗ chỗ như tổ ong, đồng thời báo ngập ảo trên mặt đường khô ráo (G0, G1).
+- **Vấn đề**: Màng nước hiển thị bị đứt đoạn, lốm đốm lỗ chỗ như tổ ong, đồng thời báo ngập ảo trên mặt đường khô ráo (G0, G1).
 - **Giải pháp**:
   - Nâng độ phân giải đầu vào LinkNet EfficientNet-B4 từ $416 \times 416$ lên $768 \times 768$ (Native aspect resolution), giữ nguyên độ sắc nét của các gợn sóng nước.
   - Áp dụng **Test-Time Augmentation (TTA)** chạy kết hợp frame gốc và frame lật ngang để triệt tiêu nhiễu giật lag.
@@ -134,7 +132,3 @@ Router mới được tích hợp trực tiếp tại prefix: `/api/v1/calibrati
 | **CAM_FLOOD_G3** | 🔴 **NGẬP NHIỀU** | **62.0 cm** | CROWDED | 32 xe | **1 nhánh** (Cắt ngang hàng xe kẹt) | NGUY HIỂM |
 
 ---
-
-## 5. TRẠNG THÁI GIT REPOSITORY
-- Đã hoàn tất commit sạch: `feat(calibration): add road ROI and multi-branch tripwires router, upgrade SOTA water segmentation`
-- Đã push thành công lên GitHub remote: `https://github.com/huyhd2334/AI-For-Impact.git` (`main -> main`).
