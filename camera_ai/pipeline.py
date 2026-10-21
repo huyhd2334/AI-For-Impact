@@ -1,4 +1,5 @@
 import os
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +69,33 @@ class UnifiedCameraAnalyzer:
         """
         return self.road_manager.calibrate(camera_id, reference_frame, force=force)
 
+    def _get_tripwires(self, camera_id: str) -> Optional[List[Dict[str, Any]]]:
+        if not hasattr(self, '_camera_tripwires_cache'):
+            self._camera_tripwires_cache = {}
+        if camera_id in self._camera_tripwires_cache:
+            return self._camera_tripwires_cache[camera_id]
+
+        cache_dir = Path(__file__).resolve().parent.parent / "road_segmentation" / "cache"
+        tw_file = cache_dir / f"{camera_id}_tripwires.json"
+        roi_file = cache_dir / f"{camera_id}_road_roi.json"
+
+        tripwires = []
+        if tw_file.exists():
+            try:
+                with open(tw_file, "r", encoding="utf-8") as f:
+                    tripwires = json.load(f).get("tripwires", [])
+            except Exception:
+                pass
+        elif roi_file.exists():
+            try:
+                with open(roi_file, "r", encoding="utf-8") as f:
+                    tripwires = json.load(f).get("tripwires", [])
+            except Exception:
+                pass
+
+        self._camera_tripwires_cache[camera_id] = tripwires
+        return tripwires
+
     def analyze_frame(
         self,
         camera_id: str,
@@ -92,8 +120,9 @@ class UnifiedCameraAnalyzer:
         )
 
         # Step 2: Traffic Counter (Vehicles, speed, stopped vehicles, congestion)
+        camera_tripwires = self._get_tripwires(camera_id)
         total_vehicles, breakdown, annotated_traffic, avg_speed_kmh, tripwire_info = self.vehicle_detector.detect_and_count(
-            frame, timestamp=timestamp
+            frame, timestamp=timestamp, tripwires=camera_tripwires
         )
 
         stopped_vehicles = tripwire_info.get("stopped_vehicles", 0)
@@ -124,6 +153,7 @@ class UnifiedCameraAnalyzer:
             "avg_speed_kmh": avg_speed_kmh,
             "flow_vpm": flow_vpm,
             "is_jammed": is_jammed,
+            "tripwire_info": tripwire_info,
             "boxes": detected_boxes,
             "annotated_frame": annotated_traffic
         }
@@ -139,20 +169,31 @@ class UnifiedCameraAnalyzer:
         flood_reasoning["road_water_ratio"] = road_water_ratio
         flood_reasoning["water_mask"] = water_mask
 
-        # Step 4: Flood Detector & Water Depth Estimator (độ sâu có đáng tin không?)
-        # Extract vehicle bounding boxes for automotive submersion checks
-        raw_boxes = []
-        for tid, td in getattr(self.vehicle_detector, 'track_details', {}).items():
-            if 'last_box' in td:
-                raw_boxes.append({"box": td['last_box'], "class": "car"})
-
+        # Step 4: SOTA Flood Detector & Water Depth Estimator (Đo mực nước đa tầng)
+        detected_objects = []
+        detector_objs = getattr(self.vehicle_detector, 'last_detected_objects', None) or getattr(self.vehicle_detector, 'last_detected_vehicles', [])
+        for obj in detector_objs:
+            if 'box' in obj:
+                detected_objects.append({
+                    'box': obj['box'],
+                    'class': obj.get('class', 'car'),
+                    'conf': obj.get('conf', 0.6)
+                })
+        if not detected_objects:
+            for tid, td in getattr(self.vehicle_detector, 'track_details', {}).items():
+                if 'last_box' in td:
+                    detected_objects.append({
+                        'box': td['last_box'],
+                        'class': td.get('class', 'car'),
+                        'conf': 0.6
+                    })
         depth_estimation = self.depth_estimator.estimate_depth(
             frame=frame,
             water_mask=water_mask,
             road_water_ratio=road_water_ratio,
-            detected_vehicles=raw_boxes
+            detected_vehicles=detected_objects,
+            sidewalk_mask=sidewalk_mask
         )
-
         # Step 5: Result Fusion (Bộ kết hợp kết quả)
         event, annotated_composite = self.fusion.fuse(
             camera_id=camera_id,

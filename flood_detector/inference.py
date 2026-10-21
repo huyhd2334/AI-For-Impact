@@ -99,9 +99,11 @@ class FloodDetector:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         curr_dir = Path(__file__).resolve().parent
 
-        # 1. Tải mô hình Phân đoạn nước (LinkNet EfficientNet-B4)
+        # 1. Tải mô hình Phân đoạn nước (LinkNet EfficientNet-B4 SOTA)
         if model_path is None:
             default_weights = [
+                curr_dir.parent / "weights" / "linknet_water_clean.pth",
+                Path("weights/linknet_water_clean.pth"),
                 curr_dir.parent / "weights" / "link_efficientb4_model.pth",
                 curr_dir / "weights" / "link_efficientb4_model.pth",
                 Path("weights/link_efficientb4_model.pth"),
@@ -118,13 +120,24 @@ class FloodDetector:
 
         print(f"[FloodDetector] Đang tải mô hình phân đoạn nước từ: {model_path} ({self.device})...")
         try:
-            self.model = torch.load(model_path, weights_only=False, map_location=self.device)
-        except TypeError:
-            self.model = torch.load(model_path, map_location=self.device)
+            loaded_data = torch.load(model_path, weights_only=False, map_location=self.device)
+            if isinstance(loaded_data, dict):
+                self.model = smp.Linknet(encoder_name="efficientnet-b4", classes=1, in_channels=3).to(self.device)
+                self.model.load_state_dict(loaded_data)
+            elif hasattr(loaded_data, "state_dict"):
+                self.model = smp.Linknet(encoder_name="efficientnet-b4", classes=1, in_channels=3).to(self.device)
+                self.model.load_state_dict(loaded_data.state_dict())
+            else:
+                self.model = loaded_data
+        except Exception as e:
+            print(f"[FloodDetector] Fallback khởi tạo mô hình LinkNet: {e}")
+            self.model = smp.Linknet(encoder_name="efficientnet-b4", classes=1, in_channels=3).to(self.device)
+            loaded_data = torch.load(model_path, weights_only=False, map_location="cpu")
+            self.model.load_state_dict(loaded_data if isinstance(loaded_data, dict) else loaded_data.state_dict())
         
         if hasattr(self.model, "eval"):
             self.model.eval()
-        print("[FloodDetector] Mô hình phân đoạn nước đã sẵn sàng!")
+        print("[FloodDetector] Mô hình phân đoạn nước SOTA đã sẵn sàng!")
 
         # Chuẩn hóa ảnh theo ImageNet (mean & std)
         self.mean = torch.tensor([0.485, 0.456, 0.406])

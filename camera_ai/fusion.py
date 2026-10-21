@@ -53,7 +53,8 @@ class CameraResultFusion:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
         mean_brightness = float(np.mean(gray))
         laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        is_low_quality = (mean_brightness < 18.0) or (laplacian_var < 30.0)
+        # Truly low quality: completely dark (< 10) or extreme blur (< 7) with no vehicle features
+        is_low_quality = (mean_brightness < 10.0) or (laplacian_var < 7.0 and len(traffic_data.get("boxes", [])) == 0)
 
         # 1. Fuse Flood Decision (Mapping to: UNKNOWN, Không ngập, Ngập đi được, Ngập nhiều)
         is_flooded_reason = bool(flood_reasoning.get("is_flooded", False))
@@ -197,7 +198,12 @@ class CameraResultFusion:
         )
 
         # 4. Render Composite Visual Evidence
-        annotated = frame.copy()
+        # Start with annotated traffic frame so vehicle bounding boxes & tracking lines stay 100% crisp
+        annotated_traffic = traffic_data.get("annotated_frame")
+        if annotated_traffic is not None and annotated_traffic.shape == frame.shape:
+            annotated = annotated_traffic.copy()
+        else:
+            annotated = frame.copy()
         h, w = annotated.shape[:2]
 
         # Draw road boundary outline from cached road mask
@@ -205,17 +211,12 @@ class CameraResultFusion:
             contours, _ = cv2.findContours((road_mask > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(annotated, contours, -1, (255, 165, 0), 2, cv2.LINE_AA)
 
-        # Overlay detected water mask with translucent blue
+        # Overlay detected water mask with translucent cyan-blue
         water_mask = flood_reasoning.get("water_mask")
         if water_mask is not None and np.any(water_mask > 0):
             water_idx = water_mask > 0
             water_color = np.full_like(annotated, (255, 120, 0)) # BGR cyan-blue
             annotated[water_idx] = cv2.addWeighted(annotated, 0.65, water_color, 0.35, 0)[water_idx]
-
-        # Blend traffic counter annotations if present
-        annotated_traffic = traffic_data.get("annotated_frame")
-        if annotated_traffic is not None and annotated_traffic.shape == annotated.shape:
-            annotated = cv2.addWeighted(annotated, 0.50, annotated_traffic, 0.50, 0)
 
         # Render Professional HUD Dashboard Banner
         hud_scale = max(0.65, min(1.8, w / 950.0))

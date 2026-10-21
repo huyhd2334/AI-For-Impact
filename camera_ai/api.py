@@ -19,6 +19,7 @@ from .schemas import (
     AnalyzeVideoRequest
 )
 from .pipeline import UnifiedCameraAnalyzer
+from .calibration_router import router as calibration_router
 
 app = FastAPI(
     title="SafeRoute Camera AI Service",
@@ -34,6 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(calibration_router, prefix="/api/v1/calibration")
+
 # Global unified pipeline instance
 analyzer: Optional[UnifiedCameraAnalyzer] = None
 
@@ -45,7 +48,7 @@ def get_analyzer() -> UnifiedCameraAnalyzer:
         print(f"[Camera AI API] Initializing UnifiedCameraAnalyzer (Gemini Key present: {bool(gemini_key)})...")
         analyzer = UnifiedCameraAnalyzer(
             gemini_api_key=gemini_key,
-            road_model_type="twinlite",
+            road_model_type=os.getenv("ROAD_MODEL_TYPE", "b0"),
             vehicle_model_name="vn_traffic_surveillance.pt"
         )
     return analyzer

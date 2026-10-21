@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import math
 import cv2
 import numpy as np
@@ -39,7 +39,9 @@ class VehicleDetector:
         
         # Virtual Tripwire Counting Line
         self.tripwire_y_ratio = tripwire_y_ratio
+        self.custom_tripwires: List[Dict] = []
         self.tripwire_total = 0
+        self.tripwire_counts: Dict[str, int] = {}
         self.tripwire_breakdown = {}
         self.crossing_timestamps = []
         self.recent_crossings = []
@@ -89,11 +91,19 @@ class VehicleDetector:
         self.track_history.clear()
         self.heatmap_acc = None
         self.tripwire_total = 0
+        self.tripwire_counts.clear()
         self.tripwire_breakdown.clear()
         self.crossing_timestamps.clear()
         self.recent_crossings.clear()
         self.tripwire_start_time = None
         self.flow_vpm = 0.0
+
+    @staticmethod
+    def _segments_intersect(A: Tuple[float, float], B: Tuple[float, float], C: Tuple[float, float], D: Tuple[float, float]) -> bool:
+        """Determines if line segment AB intersects line segment CD."""
+        def ccw(p1, p2, p3):
+            return (p3[1] - p1[1]) * (p2[0] - p1[0]) > (p2[1] - p1[1]) * (p3[0] - p1[0])
+        return (ccw(A, C, D) != ccw(B, C, D)) and (ccw(A, B, C) != ccw(A, B, D))
 
     @staticmethod
     def _calc_iou_ios(boxA: Tuple[int, int, int, int], boxB: Tuple[int, int, int, int]) -> Tuple[float, float]:
@@ -113,7 +123,8 @@ class VehicleDetector:
     def detect_and_count(
         self, 
         frame: np.ndarray, 
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        tripwires: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[int, Dict[str, int], np.ndarray, float, Dict]:
         if timestamp is None:
             import time
@@ -193,6 +204,7 @@ class VehicleDetector:
             raw_vehicles.sort(key=lambda x: x["conf"], reverse=True)
             raw_persons.sort(key=lambda x: x["conf"], reverse=True)
             self.last_detected_vehicles = list(raw_vehicles)
+            self.last_detected_objects = list(raw_vehicles) + [{'class': 'person', 'box': p['box'], 'conf': p['conf']} for p in raw_persons]
 
             # Associate orphan riders when camera view cuts off vehicle chassis
             img_h, img_w = frame.shape[:2]
@@ -258,9 +270,19 @@ class VehicleDetector:
             font_scale = max(0.45, img_h / 3200.0)
             font_thick = max(1, int(img_h / 1800))
 
-            line_y = int(img_h * self.tripwire_y_ratio)
-            line_x1 = int(img_w * 0.05)
-            line_x2 = int(img_w * 0.95)
+            # Active Virtual Tripwires (Multi-branch or default)
+            if tripwires is not None and len(tripwires) > 0:
+                active_tripwires = tripwires
+            elif self.custom_tripwires:
+                active_tripwires = self.custom_tripwires
+            else:
+                line_y = int(img_h * self.tripwire_y_ratio)
+                active_tripwires = [{
+                    "id": "line_1",
+                    "name": "Duong chinh",
+                    "p1": [int(img_w * 0.05), line_y],
+                    "p2": [int(img_w * 0.95), line_y]
+                }]
 
             active_render_vehicles = []
             matched_tids = set()
@@ -393,15 +415,25 @@ class VehicleDetector:
                     elif speed_kmh is not None and speed_kmh < 12.0:
                         slow_vehicles += 1
 
-                # Check virtual tripwire crossing
-                prev_y = td_curr.get('prev_pos', (cx, cy))[1]
-                if (line_x1 <= cx <= line_x2) and (prev_y < line_y <= cy):
-                    if not td_curr.get('crossed_tripwire', False):
-                        td_curr['crossed_tripwire'] = True
-                        self.tripwire_total += 1
-                        self.tripwire_breakdown[cname] = self.tripwire_breakdown.get(cname, 0) + 1
-                        self.crossing_timestamps.append(timestamp)
-                        self.recent_crossings.append((int(cx), int(line_y), timestamp))
+                # Check virtual tripwire crossings across all active branches
+                prev_p = td_curr.get('prev_pos', (cx, cy))
+                curr_p = (cx, cy)
+                if 'crossed_tripwires' not in td_curr:
+                    td_curr['crossed_tripwires'] = set()
+
+                for tw in active_tripwires:
+                    tw_id = str(tw.get('id', 'line_1'))
+                    p1 = tuple(map(float, tw['p1']))
+                    p2 = tuple(map(float, tw['p2']))
+
+                    if tw_id not in td_curr['crossed_tripwires']:
+                        if self._segments_intersect(prev_p, curr_p, p1, p2):
+                            td_curr['crossed_tripwires'].add(tw_id)
+                            self.tripwire_total += 1
+                            self.tripwire_counts[tw_id] = self.tripwire_counts.get(tw_id, 0) + 1
+                            self.tripwire_breakdown[cname] = self.tripwire_breakdown.get(cname, 0) + 1
+                            self.crossing_timestamps.append(timestamp)
+                            self.recent_crossings.append((int(cx), int(cy), timestamp, tw_id))
 
                 if cname in breakdown:
                     breakdown[cname] += 1
@@ -463,65 +495,89 @@ class VehicleDetector:
                     cv2.LINE_AA
                 )
 
-            # Draw virtual tripwire line
-            trip_color = (255, 205, 0)
-            trip_thick = max(2, int(img_h / 950))
-            cv2.line(annotated_frame, (line_x1, line_y), (line_x2, line_y), trip_color, trip_thick, cv2.LINE_AA)
-            cv2.circle(annotated_frame, (line_x1, line_y), trip_thick * 2, (0, 255, 255), -1)
-            cv2.circle(annotated_frame, (line_x2, line_y), trip_thick * 2, (0, 255, 255), -1)
+        # Draw virtual tripwire lines (multi-branch or default)
+        line_palette = [
+            (0, 255, 255),   # Yellow
+            (0, 165, 255),   # Orange
+            (255, 0, 255),   # Magenta
+            (0, 255, 0),     # Lime Green
+            (255, 215, 0),   # Gold
+        ]
+        trip_thick = max(2, int(img_h / 950))
 
-            trip_label = f"[ TRIPWIRE: {self.tripwire_total} crossed | {int(self.flow_vpm)} veh/min ]"
+        for i, tw in enumerate(active_tripwires):
+            tw_id = str(tw.get('id', f'line_{i+1}'))
+            tw_name = str(tw.get('name', f'Nhanh {i+1}'))
+            p1 = tuple(map(int, tw['p1']))
+            p2 = tuple(map(int, tw['p2']))
+            color = line_palette[i % len(line_palette)]
+            cnt = self.tripwire_counts.get(tw_id, 0)
+
+            cv2.line(annotated_frame, p1, p2, color, trip_thick, cv2.LINE_AA)
+            cv2.circle(annotated_frame, p1, trip_thick * 2, (255, 255, 255), -1)
+            cv2.circle(annotated_frame, p1, trip_thick, color, -1)
+            cv2.circle(annotated_frame, p2, trip_thick * 2, (255, 255, 255), -1)
+            cv2.circle(annotated_frame, p2, trip_thick, color, -1)
+
+            mid_x = (p1[0] + p2[0]) // 2
+            mid_y = (p1[1] + p2[1]) // 2
+            badge_text = f"[{tw_name}: {cnt} veh]"
+            (tw_w, tw_h), _ = cv2.getTextSize(badge_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale * 0.65, font_thick)
+            cv2.rectangle(annotated_frame, (mid_x - 4, mid_y - tw_h - 6), (mid_x + tw_w + 4, mid_y + 4), (20, 20, 20), -1)
+            cv2.rectangle(annotated_frame, (mid_x - 4, mid_y - tw_h - 6), (mid_x + tw_w + 4, mid_y + 4), color, 1)
             cv2.putText(
-                annotated_frame, 
-                trip_label, 
-                (line_x1 + 10, max(30, line_y - 12)), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                font_scale * 0.68, 
-                trip_color, 
-                font_thick, 
+                annotated_frame,
+                badge_text,
+                (mid_x, mid_y - 3),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale * 0.65,
+                (255, 255, 255),
+                font_thick,
                 cv2.LINE_AA
             )
 
-            # Crossing flash pulse
-            surviving_crossings = []
-            for rx, ry, rt in self.recent_crossings:
-                dt = timestamp - rt
-                if 0.0 <= dt < 1.0:
-                    rad = max(1, int((1.0 + dt * 2.5) * trip_thick * 2.2))
-                    cv2.circle(annotated_frame, (rx, ry), rad, (0, 255, 255), 2, cv2.LINE_AA)
-                    surviving_crossings.append((rx, ry, rt))
-            self.recent_crossings = surviving_crossings
+        # Crossing flash pulse
+        surviving_crossings = []
+        for item in self.recent_crossings:
+            rx, ry, rt = item[0], item[1], item[2]
+            dt = timestamp - rt
+            if 0.0 <= dt < 1.0:
+                rad = max(1, int((1.0 + dt * 2.5) * trip_thick * 2.2))
+                cv2.circle(annotated_frame, (rx, ry), rad, (0, 255, 255), 2, cv2.LINE_AA)
+                surviving_crossings.append(item)
+        self.recent_crossings = surviving_crossings
 
-            # Render bounding boxes and tracking IDs
-            for (x1, y1, x2, y2, cname, tid_show, speed_kmh, is_parked) in active_render_vehicles:
-                if is_parked:
-                    color = (160, 160, 160)
-                    label = f"#{tid_show} {cname} [PARKED]"
+        # Render bounding boxes and tracking IDs
+        for (x1, y1, x2, y2, cname, tid_show, speed_kmh, is_parked) in active_render_vehicles:
+            if is_parked:
+                color = (160, 160, 160)
+                label = f"#{tid_show} {cname} [PARKED]"
+            else:
+                color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
+                if speed_kmh is not None:
+                    spd_str = f" | {int(speed_kmh)}km/h" if speed_kmh > 0 else " | 0km/h"
                 else:
-                    color = (0, 255, 0) if cname in ["motorcycle", "bicycle"] else (0, 215, 255)
-                    if speed_kmh is not None:
-                        spd_str = f" | {int(speed_kmh)}km/h" if speed_kmh > 0 else " | 0km/h"
-                    else:
-                        spd_str = ""
-                    label = f"#{tid_show} {cname}{spd_str}"
+                    spd_str = ""
+                label = f"#{tid_show} {cname}{spd_str}"
 
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
-                cv2.putText(
-                    annotated_frame, 
-                    label, 
-                    (x1, max(y1 - 8, int(18 * font_scale))), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    font_scale * 0.9, 
-                    color, 
-                    font_thick, 
-                    cv2.LINE_AA
-                )
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, line_thick)
+            cv2.putText(
+                annotated_frame, 
+                label, 
+                (x1, max(y1 - 8, int(18 * font_scale))), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                font_scale * 0.9, 
+                color, 
+                font_thick, 
+                cv2.LINE_AA
+            )
 
         avg_speed_kmh = float(np.mean(active_speeds)) if active_speeds else None
 
         tripwire_info = {
             "total_crossed": self.tripwire_total,
             "flow_vpm": self.flow_vpm,
+            "counts_by_line": self.tripwire_counts,
             "breakdown": self.tripwire_breakdown,
             "stopped_vehicles": stopped_vehicles,
             "slow_vehicles": slow_vehicles,

@@ -81,3 +81,77 @@ def test_get_camera_events():
     events = response.json()
     assert isinstance(events, list)
     assert len(events) >= 1
+
+
+def test_calibration_router_road_roi():
+    cam_id = "TEST_CAM_ROUTER"
+    # 1. Set Road ROI
+    payload = {
+        "camera_id": cam_id,
+        "road_polygons": [
+            [[100, 200], [500, 200], [500, 600], [100, 600]]
+        ],
+        "image_size": [1344, 768],
+        "curb_buffer_px": 30
+    }
+    res = client.post("/api/v1/calibration/road-roi", json=payload)
+    assert res.status_code == 200
+    d = res.json()
+    assert d["status"] == "success"
+    assert d["camera_id"] == cam_id
+    assert d["polygons_count"] == 1
+    assert d["road_area_ratio"] > 0
+
+    # 2. Get Road ROI
+    res_get = client.get(f"/api/v1/calibration/road-roi/{cam_id}")
+    assert res_get.status_code == 200
+    d_get = res_get.json()
+    assert d_get["camera_id"] == cam_id
+    assert len(d_get["road_polygons"]) == 1
+
+    # 3. Clean up
+    res_del = client.delete(f"/api/v1/calibration/road-roi/{cam_id}")
+    assert res_del.status_code == 200
+
+
+def test_calibration_router_tripwires():
+    cam_id = "TEST_CAM_ROUTER"
+    # 1. Set Tripwires
+    payload = {
+        "camera_id": cam_id,
+        "tripwires": [
+            {"id": "line_1", "name": "Nhanh 1", "p1": [100, 400], "p2": [600, 400]},
+            {"id": "line_2", "name": "Nhanh 2", "p1": [700, 400], "p2": [1200, 400]}
+        ],
+        "image_size": [1344, 768]
+    }
+    res = client.post("/api/v1/calibration/tripwires", json=payload)
+    assert res.status_code == 200
+    d = res.json()
+    assert d["status"] == "success"
+    assert d["tripwires_count"] == 2
+
+    # 2. Get Tripwires
+    res_get = client.get(f"/api/v1/calibration/tripwires/{cam_id}")
+    assert res_get.status_code == 200
+    d_get = res_get.json()
+    assert d_get["tripwires_count"] == 2
+
+    # 3. Summary
+    res_sum = client.get(f"/api/v1/calibration/summary/{cam_id}")
+    assert res_sum.status_code == 200
+    d_sum = res_sum.json()
+    assert d_sum["has_tripwires"] is True
+    assert d_sum["tripwires_count"] == 2
+
+    # 4. Clean up
+    res_del = client.delete(f"/api/v1/calibration/tripwires/{cam_id}")
+    assert res_del.status_code == 200
+
+
+def test_calibration_router_list_summary():
+    res = client.get("/api/v1/calibration/summary")
+    assert res.status_code == 200
+    d = res.json()
+    assert "total_calibrated_cameras" in d
+    assert isinstance(d["cameras"], list)

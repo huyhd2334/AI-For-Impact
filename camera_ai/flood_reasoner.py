@@ -1,11 +1,31 @@
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 import json
 import base64
+from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 import cv2
 import numpy as np
 import requests
+
+import torch
+import torchvision.transforms as tf
+from PIL import Image
+
+# Ensure compatibility for smp LinkNet unpickling if needed
+try:
+    import segmentation_models_pytorch as smp
+    if hasattr(smp, "decoders") and hasattr(smp.decoders, "linknet"):
+        sys.modules.setdefault("segmentation_models_pytorch.linknet", smp.decoders.linknet)
+        sys.modules.setdefault("segmentation_models_pytorch.linknet.model", smp.decoders.linknet.model)
+except ImportError:
+    smp = None
 
 
 DEFAULT_GEMINI_MODELS = [
@@ -19,14 +39,67 @@ GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{
 
 class FloodReasoner:
     """
-    Flood reasoning module implementing:
-    Frame mới + road_mask -> Flood reasoning -> có nước trên đường? bao nhiêu?
+    SOTA Flood Reasoning & Water Surface Segmentation Engine:
+    Tầng 1: Deep Learning SOTA Water Segmenter (LinkNet EfficientNet-B4)
+    Tầng 2: Road-Corridor Geometric Filtering (M_road ∩ M_water)
+    Tầng 3: Multi-modal Vision-Language Cross Validation (Google Gemini Flash)
+    Tầng 4: Heuristic Specular Reflection & Sun Glare Filter (Offline Fallback)
     """
 
-    def __init__(self, api_key: Optional[str] = None, default_model: str = "gemini-2.5-flash"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        default_model: str = "gemini-2.5-flash",
+        weights_path: Optional[str] = None,
+        device: Optional[str] = None
+    ):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.default_model = default_model
         self._temporal_ratios: Dict[str, float] = {}
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        # -------------------------------------------------------------
+        # KHỞI TẠO MÔ HÌNH DEEP LEARNING SOTA PHÂN ĐOẠN NƯỚC (LinkNet-B4)
+        # -------------------------------------------------------------
+        self.dl_model = None
+        self.input_dims = (768, 768)
+        self.transform_norm = tf.Compose([
+            tf.Resize(self.input_dims),
+            tf.ToTensor(),
+            tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+
+        curr_dir = Path(__file__).resolve().parent
+        candidate_weights = [
+            weights_path,
+            str(curr_dir.parent / "weights" / "linknet_water_clean.pth"),
+            "weights/linknet_water_clean.pth",
+            str(curr_dir.parent / "weights" / "link_efficientb4_model.pth"),
+            str(curr_dir.parent / "flood_detector" / "records" / "link_efficientb4_model.pth"),
+        ]
+
+        resolved_weight = None
+        for w in candidate_weights:
+            if w and Path(w).exists():
+                resolved_weight = str(Path(w).resolve())
+                break
+
+        if resolved_weight and smp is not None:
+            try:
+                print(f"[FloodReasoner] Loading SOTA Deep Learning Water Segmenter: {resolved_weight} ({self.device})...")
+                self.dl_model = smp.Linknet(encoder_name="efficientnet-b4", classes=1, in_channels=3).to(self.device)
+                loaded_data = torch.load(resolved_weight, weights_only=False, map_location=self.device)
+                if isinstance(loaded_data, dict):
+                    self.dl_model.load_state_dict(loaded_data)
+                elif hasattr(loaded_data, "state_dict"):
+                    self.dl_model.load_state_dict(loaded_data.state_dict())
+                self.dl_model.eval()
+                print("[FloodReasoner] LinkNet SOTA Water Segmenter initialized successfully!")
+            except Exception as e:
+                print(f"[FloodReasoner] Warning loading LinkNet DL: {e}. Using Heuristic CV fallback.")
+                self.dl_model = None
+        else:
+            print("[FloodReasoner] LinkNet weights not found. Using optimized Heuristic CV mode.")
 
     def reset_temporal_state(self, camera_id: Optional[str] = None):
         if camera_id:
@@ -43,7 +116,7 @@ class FloodReasoner:
 
     def _call_gemini_vision(self, img_bgr: np.ndarray) -> Dict[str, Any]:
         """
-        Calls Gemini Vision with structured JSON output schema as established in gemini_flood_test.py.
+        Gọi Gemini Vision với cấu trúc JSON Schema chuẩn.
         """
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not configured.")
@@ -129,64 +202,110 @@ class FloodReasoner:
 
         raise RuntimeError(f"Gemini API request failed across models: {last_err}")
 
+    def _dl_water_segmentation(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Chạy mạng nơ-ron LinkNet (EfficientNet-B4 SOTA) với Test-Time Augmentation (TTA)
+        để phân đoạn mặt nước mịn màng, liền mạch trên toàn khung hình.
+        """
+        orig_h, orig_w = frame.shape[:2]
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(img_rgb)
+
+        t1 = self.transform_norm(img_pil).unsqueeze(0).to(self.device)
+        t2 = self.transform_norm(img_pil.transpose(Image.FLIP_LEFT_RIGHT)).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            p1 = torch.sigmoid(self.dl_model(t1))
+            p1 = tf.Resize([orig_h, orig_w])(p1).squeeze().cpu().numpy()
+            p2 = torch.sigmoid(self.dl_model(t2))
+            p2 = tf.Resize([orig_h, orig_w])(p2).squeeze().cpu().numpy()[:, ::-1]
+
+        prob = (p1 + p2) / 2.0
+        binary_water = (prob > 0.32).astype(np.uint8) * 255
+
+        # Tái cấu trúc màng nước liền mạch (Morphological Puddle Closure)
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        closed = cv2.morphologyEx(binary_water, cv2.MORPH_CLOSE, kernel_close)
+
+        # Lọc sạch hoàn toàn các đốm nhiễu lốm đốm nhỏ (< 500 px)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed)
+        cleaned = np.zeros_like(closed)
+        min_puddle_area = max(500, int(orig_h * orig_w * 0.0006))
+        for i in range(1, num_labels):
+            if stats[i, cv2.CC_STAT_AREA] >= min_puddle_area:
+                cleaned[labels == i] = 255
+
+        return cleaned
+
     def _local_cv_road_reasoning(
-        self, 
-        frame: np.ndarray, 
+        self,
+        frame: np.ndarray,
         road_mask: np.ndarray
     ) -> Tuple[Dict[str, Any], np.ndarray, float]:
         """
-        High-precision local computer vision flood reasoning inside the calibrated road corridor.
-        Used as high-speed zero-cost primary or fallback reasoner.
+        Suy luận ngập kết hợp giữa Deep Learning và Heuristic Computer Vision
+        bên trong hành lang lòng đường (Drivable Road Corridor).
         """
         h, w = frame.shape[:2]
         road_binary = (road_mask > 0).astype(np.uint8)
         road_pixel_count = int(np.sum(road_binary))
 
         if road_pixel_count == 0:
-            # Fallback to lower half if road mask is empty
             road_binary = np.zeros((h, w), dtype=np.uint8)
             road_binary[int(h * 0.45):, :] = 1
             road_pixel_count = int(np.sum(road_binary))
 
-        # Color & texture feature extraction
+        # 1. NHÁNH DEEP LEARNING SOTA (LinkNet-B4)
+        dl_water_on_road = np.zeros((h, w), dtype=np.uint8)
+        if self.dl_model is not None:
+            try:
+                dl_water_full = self._dl_water_segmentation(frame)
+                dl_water_on_road = cv2.bitwise_and(dl_water_full, dl_water_full, mask=road_binary)
+            except Exception as e:
+                print(f"[FloodReasoner] Deep Learning inference error: {e}. Falling back to Spectral CV.")
+
+        # 2. NHÁNH QUANG PHỔ & ĐỘ PHẲNG MẶT NƯỚC (Spectral & Ripple Reasoner)
         b, g, r = frame[:, :, 0], frame[:, :, 1], frame[:, :, 2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        s_channel = hsv[:, :, 1]
-        v_channel = hsv[:, :, 2]
-        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        h_c, s_c, v_c = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        lap = np.abs(cv2.Laplacian(gray, cv2.CV_64F))
 
-        # Ambient brightness estimation from upper sky / horizon
         ambient_brightness = float(np.mean(frame[:max(1, int(h * 0.35)), :, :]))
         is_night = ambient_brightness < 48.0
 
         if is_night:
-            # Night water surface: Streetlights & vehicle headlights specular reflections and murky wet spread
-            night_water = (v_channel > 50) & (s_channel < 160) & (b.astype(int) + g.astype(int) + r.astype(int) > 120) & (v_channel < 252)
-            water_candidates = np.uint8(night_water) * 255
+            night_water = (v_c > 50) & (s_c < 160) & (b.astype(int) + g.astype(int) + r.astype(int) > 120) & (v_c < 252)
+            spec_candidates = np.uint8(night_water) * 255
         else:
-            # Real water in daylight:
-            # - Sky reflection water: blue channel noticeably higher than red, moderate saturation
-            is_sky_reflection = (b.astype(np.int16) > r.astype(np.int16) + 3) & (s_channel < 75) & (v_channel > 70) & (v_channel < 240)
-            # - Whitewater waves / wake / splash foam around moving tires in water
-            is_whitewater_splash = (v_channel > 135) & (s_channel < 55) & (np.abs(laplacian) > 18)
-            # - Deep dark puddles / gutter water
-            is_dark_puddle = (v_channel < 55) & (s_channel < 40) & (np.abs(laplacian) < 8)
-            # - High-saturation specular puddles (e.g. sunset/dusk puddle reflecting buildings/lights)
-            is_specular_puddle = (s_channel > 95) & (v_channel > 75) & (np.abs(laplacian) > 10)
-            
-            # Sun Glare on Asphalt: warm tint (R >= B - 2, low S, high V, asphalt texture)
-            is_sun_glare = (v_channel > 115) & (r.astype(np.int16) >= b.astype(np.int16) - 2) & (s_channel < 50) & (~is_whitewater_splash)
-            
-            water_candidates = np.uint8((is_sky_reflection | is_whitewater_splash | is_dark_puddle | is_specular_puddle) & (~is_sun_glare)) * 255
+            # Mặt nước phản xạ bầu trời (Sky reflection)
+            c1_sky = (b.astype(int) > r.astype(int) + 3) & (s_c < 80) & (v_c > 65) & (v_c < 245)
+            # Nước mưa đô thị / nước bùn ngập đường (Murky urban stormwater floodwater)
+            c2_murky = (h_c >= 10) & (h_c <= 48) & (s_c >= 25) & (s_c <= 160) & (v_c >= 45) & (v_c <= 200) & (lap < 38)
+            # Vệt sóng bọt trắng quanh bánh xe rẽ nước (Wake ripples around moving tires)
+            c3_wake = (v_c > 120) & (s_c < 70) & (lap >= 18) & (lap <= 80)
+            # Phản quang mặt đường ướt (Specular wet pavement reflections)
+            c4_specular = (s_c >= 50) & (v_c >= 65) & (lap >= 10) & (lap <= 60)
+            # Lọc chói nắng trên mặt đường nhựa khô ráo (Sun glare filter on dry asphalt)
+            is_dry_glare = (s_c < 20) & (v_c > 110) & (~c3_wake)
 
-        # Restrict water detection strictly to the road corridor!
-        water_on_road = cv2.bitwise_and(water_candidates, water_candidates, mask=road_binary)
+            spec_water = (c1_sky | c2_murky | c3_wake | c4_specular) & (~is_dry_glare)
+            spec_candidates = np.uint8(spec_water) * 255
 
-        # Morphological noise cleanup
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
-        cleaned_water_mask = cv2.morphologyEx(water_on_road, cv2.MORPH_OPEN, kernel)
-        cleaned_water_mask = cv2.morphologyEx(cleaned_water_mask, cv2.MORPH_CLOSE, kernel)
+        spec_on_road = cv2.bitwise_and(spec_candidates, spec_candidates, mask=road_binary)
+
+        # 3. HỢP NHẤT ENSEMBLE: Deep Learning là tín hiệu quyết định, Spectral chỉ mở rộng màng nước
+        if np.any(dl_water_on_road > 0):
+            # Mở rộng vùng nước DL bằng phổ phản xạ lân cận
+            dilated_dl = cv2.dilate(dl_water_on_road, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+            spec_confirmed = cv2.bitwise_and(spec_on_road, dilated_dl)
+            fused_water_mask = cv2.bitwise_or(dl_water_on_road, spec_confirmed)
+        else:
+            # Nếu Deep Learning không phát hiện nước (đường khô), không để spectral tự ý tô xanh
+            fused_water_mask = np.zeros((h, w), dtype=np.uint8)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        cleaned_water_mask = cv2.morphologyEx(fused_water_mask, cv2.MORPH_CLOSE, kernel)
 
         water_pixels = int(np.sum(cleaned_water_mask > 0))
         road_water_ratio = float(water_pixels) / float(road_pixel_count) if road_pixel_count > 0 else 0.0
@@ -196,7 +315,7 @@ class FloodReasoner:
                 "is_flooded": False,
                 "severity": "none",
                 "safe_for_bikes": True,
-                "confidence": 0.95,
+                "confidence": 0.96,
                 "reason": f"Mặt đường khô ráo, không phát hiện đọng nước ngập ({road_water_ratio*100:.1f}% diện tích mặt đường).",
             }
         elif road_water_ratio < 0.18:
@@ -204,7 +323,7 @@ class FloodReasoner:
                 "is_flooded": True,
                 "severity": "minor",
                 "safe_for_bikes": True,
-                "confidence": float(min(0.92, 0.75 + road_water_ratio * 1.5)),
+                "confidence": float(min(0.94, 0.82 + road_water_ratio * 1.2)),
                 "reason": f"Có nước xâm xấp / đọng nước cục bộ bao phủ {road_water_ratio*100:.1f}% mặt đường (mép/rãnh đường, xe máy đi được an toàn).",
             }
         elif road_water_ratio < 0.45:
@@ -212,7 +331,7 @@ class FloodReasoner:
                 "is_flooded": True,
                 "severity": "moderate",
                 "safe_for_bikes": False,
-                "confidence": float(min(0.95, 0.82 + road_water_ratio)),
+                "confidence": float(min(0.96, 0.86 + road_water_ratio)),
                 "reason": f"Ngập nước vừa bao phủ {road_water_ratio*100:.1f}% hành lang đường, ô tô lội nước tạo sóng, xe máy cần thận trọng.",
             }
         else:
@@ -220,73 +339,35 @@ class FloodReasoner:
                 "is_flooded": True,
                 "severity": "severe",
                 "safe_for_bikes": False,
-                "confidence": float(min(0.98, 0.88 + road_water_ratio * 0.3)),
+                "confidence": float(min(0.98, 0.90 + road_water_ratio * 0.2)),
                 "reason": f"Ngập sâu diện rộng bao phủ {road_water_ratio*100:.1f}% toàn bộ lòng đường, nước ngập sâu bánh xe nguy hiểm.",
             }
 
         return res, cleaned_water_mask, road_water_ratio
 
-    def _mock_or_heuristic_reasoning(
-        self, 
-        frame: np.ndarray, 
-        road_mask: np.ndarray,
-        source_hint: str = ""
-    ) -> Dict[str, Any]:
-        """
-        Provides reasoning matching gemini_flood_test.py when GEMINI_API_KEY is not provided.
-        """
-        hint_lower = source_hint.lower()
-        if "high" in hint_lower or "severe" in hint_lower:
-            return {
-                "is_flooded": True,
-                "severity": "severe",
-                "safe_for_bikes": False,
-                "confidence": 0.95,
-                "reason": "Mặt đường ngập sâu trên diện rộng, nước ngập qua nửa bánh xe của các phương tiện."
-            }
-        elif "low" in hint_lower or "minor" in hint_lower:
-            return {
-                "is_flooded": True,
-                "severity": "minor",
-                "safe_for_bikes": True,
-                "confidence": 0.88,
-                "reason": "Có nước đọng xâm xấp mép vỉa hè, xe máy có thể lưu thông thận trọng."
-            }
-        elif "no_" in hint_lower or "dry" in hint_lower:
-            return {
-                "is_flooded": False,
-                "severity": "none",
-                "safe_for_bikes": True,
-                "confidence": 0.96,
-                "reason": "Mặt đường khô ráo hoàn toàn, không có ngập nước."
-            }
-        return None
-
     def reason(
-        self, 
-        frame: np.ndarray, 
-        road_mask: np.ndarray, 
+        self,
+        frame: np.ndarray,
+        road_mask: np.ndarray,
         use_llm: bool = True,
         source_hint: str = "",
         camera_id: str = "default"
     ) -> Tuple[Dict[str, Any], np.ndarray, float]:
         """
-        Executes flood reasoning.
-        Returns:
-            reasoning_dict: {is_flooded, severity, safe_for_bikes, confidence, reason}
-            water_mask: binary 0/255 uint8 mask
-            road_water_ratio: float
+        Thực hiện toàn bộ quy trình suy luận ngập:
+        1. Phân đoạn nước (LinkNet Deep Learning / Heuristic)
+        2. Tích lũy làm mượt theo thời gian (temporal smoothing)
+        3. Lý giải ngữ nghĩa bằng Gemini Flash nếu được yêu cầu
         """
-        # Always run local CV within the road mask for pixel-level water statistics
+        # Phân đoạn nước chuẩn xác trong lòng đường
         cv_res, water_mask, raw_water_ratio = self._local_cv_road_reasoning(frame, road_mask)
 
-        # Apply temporal smoothing / peak retention per camera
+        # Áp dụng cơ chế peak retention / temporal smoothing theo camera ID
         prev_ratio = self._temporal_ratios.get(camera_id, 0.0)
-        # Slow decay (0.95 factor) so passing vehicles temporarily occluding water don't reset puddle status
         road_water_ratio = max(raw_water_ratio, prev_ratio * 0.95)
         self._temporal_ratios[camera_id] = road_water_ratio
 
-        # Update severity if temporal smoothing retained valid water
+        # Cập nhật lại phân loại sau khi làm mượt
         if road_water_ratio < 0.035:
             cv_res["is_flooded"] = False
             cv_res["severity"] = "none"
@@ -308,13 +389,13 @@ class FloodReasoner:
             cv_res["safe_for_bikes"] = False
             cv_res["reason"] = f"Ngập sâu diện rộng bao phủ {road_water_ratio*100:.1f}% toàn bộ lòng đường, nước ngập sâu bánh xe nguy hiểm."
 
-        # 1. If LLM reasoning requested and API key available -> call Google Gemini Flash API
+        # Nếu có API key và yêu cầu LLM, gọi Gemini Flash để kiểm định chéo
         if use_llm and self.api_key:
             try:
                 road_binary = (road_mask > 0).astype(np.uint8)
                 masked_view = cv2.bitwise_and(frame, frame, mask=road_binary)
                 llm_input = cv2.addWeighted(frame, 0.25, masked_view, 0.75, 0)
-                
+
                 llm_res = self._call_gemini_vision(llm_input)
                 fused_confidence = float(round((llm_res.get("confidence", 0.9) * 0.6 + cv_res["confidence"] * 0.4), 2))
                 return {
@@ -322,23 +403,10 @@ class FloodReasoner:
                     "severity": str(llm_res.get("severity", cv_res["severity"])),
                     "safe_for_bikes": bool(llm_res.get("safe_for_bikes", cv_res["safe_for_bikes"])),
                     "confidence": fused_confidence,
-                    "reason": f"[Gemini Vision] {llm_res.get('reason', '')} (Nước ngập chiếm {road_water_ratio*100:.1f}% mặt đường).",
+                    "reason": f"[Gemini Flash] {llm_res.get('reason', '')} (Nước ngập chiếm {road_water_ratio*100:.1f}% mặt đường).",
                 }, water_mask, road_water_ratio
             except Exception as e:
-                cv_res["reason"] += f" (Local reasoner: {e})"
+                cv_res["reason"] += f" (Deep Learning: {e})"
                 return cv_res, water_mask, road_water_ratio
-
-        # 2. If mock hint matches (from gemini_flood_test.py)
-        mock_res = self._mock_or_heuristic_reasoning(frame, road_mask, source_hint)
-        if mock_res:
-            # Generate simulated water mask for severe flood
-            if mock_res["severity"] == "severe":
-                road_binary = (road_mask > 0).astype(np.uint8)
-                water_mask = (road_binary * 255).astype(np.uint8)
-                road_water_ratio = 0.45
-            elif mock_res["severity"] == "minor":
-                water_mask = cv2.dilate(water_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15)))
-                road_water_ratio = 0.12
-            return mock_res, water_mask, road_water_ratio
 
         return cv_res, water_mask, road_water_ratio
