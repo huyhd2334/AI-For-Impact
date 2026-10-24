@@ -14,7 +14,6 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    /* Subtle custom scrollbar */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
@@ -26,7 +25,6 @@
       box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
     }
     
-    /* Markdown prose tuning */
     .prose p { margin-bottom: 0.5rem; line-height: 1.5; }
     .prose p:last-child { margin-bottom: 0; }
     .prose ul { margin-top: 0.25rem; margin-bottom: 0.5rem; padding-left: 1.25rem; }
@@ -45,7 +43,7 @@
 <body class="h-full flex flex-col font-sans antialiased overflow-hidden bg-slate-100/70 text-slate-800">
 
   <!-- Top Navigation Bar -->
-  <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between z-10">
+  <header class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between z-10 shrink-0">
     <div class="flex items-center space-x-3">
       <div class="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs tracking-wider">
         SR
@@ -58,13 +56,24 @@
             Trực tuyến
           </span>
         </div>
-        <p class="text-xs text-slate-500">Hệ thống điều phối tác vụ & Giám sát giao thông đô thị</p>
+        <p class="text-[11px] text-slate-500">Điều phối tác vụ & Định cỡ lòng đường Camera</p>
       </div>
     </div>
     
+    <!-- Central Navigation Tabs -->
+    <nav class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+      <button id="navTabOps" onclick="switchMainTab('operations')" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition">
+        Giám sát & Điều phối Tác vụ
+      </button>
+      <button id="navTabCalib" onclick="switchMainTab('calibration')" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 transition">
+        Định cỡ Lòng đường & Vạch đếm (Studio)
+      </button>
+    </nav>
+
+    <!-- Header Actions -->
     <div class="flex items-center space-x-3">
       <span class="text-xs text-slate-500 font-medium hidden sm:inline">
-        LLM Core: Groq LPU
+        Groq LPU (3x Keys)
       </span>
       <a href="/docs" target="_blank" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 border border-slate-200/80 transition">
         Tài liệu API
@@ -72,8 +81,10 @@
     </div>
   </header>
 
-  <!-- Main Content Split -->
-  <main class="flex-1 flex overflow-hidden">
+  <!-- ========================================================================= -->
+  <!-- TAB 1: OPERATIONS & CHAT AGENT VIEW -->
+  <!-- ========================================================================= -->
+  <main id="viewOperations" class="flex-1 flex overflow-hidden">
     
     <!-- LEFT: Conversational Agent Chat -->
     <section class="w-full lg:w-1/2 flex flex-col border-r border-slate-200 bg-white">
@@ -116,6 +127,7 @@
             <ul class="list-disc list-inside space-y-1 text-xs text-slate-600">
               <li>Giao việc: <code class="text-slate-700">Phân tích video flood_g2...</code> hoặc link luồng RTSP</li>
               <li>Tra cứu: <code class="text-slate-700">Task vừa giao làm tới đâu rồi?</code></li>
+              <li>Dừng việc: <code class="text-slate-700">Dừng task</code></li>
             </ul>
           </div>
         </div>
@@ -259,17 +271,200 @@
 
   </main>
 
+  <!-- ========================================================================= -->
+  <!-- TAB 2: CALIBRATION STUDIO (VẼ LÒNG ĐƯỜNG & VẠCH ĐẾM XE) -->
+  <!-- ========================================================================= -->
+  <main id="viewCalibration" class="hidden flex-1 flex flex-col overflow-hidden bg-slate-50">
+    
+    <!-- Top Action Toolbar for Calibration -->
+    <div class="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-xs">
+      
+      <!-- Input Video Source -->
+      <div class="flex items-center gap-2">
+        <label class="cursor-pointer px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold transition flex items-center gap-1.5">
+          <span>Chọn file Video</span>
+          <input type="file" id="calibFileInput" accept="video/*" class="hidden" onchange="handleUploadVideoFile(event)">
+        </label>
+        <span class="text-xs text-slate-400 font-medium">hoặc</span>
+        <input 
+          type="text" 
+          id="calibPathInput" 
+          placeholder="Đường dẫn: data_test/flood_g2_0190_3e225b42.mp4" 
+          value="data_test/flood_g2_0190_3e225b42.mp4"
+          class="w-72 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 focus:bg-white transition"
+        />
+        <button 
+          onclick="extractVideoFrame()" 
+          id="btnExtractFrame"
+          class="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition shadow-xs"
+        >
+          Trích xuất Frame
+        </button>
+      </div>
+
+      <!-- Camera ID & Drawing Controls -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs font-medium text-slate-500">Mã Camera:</span>
+          <input 
+            type="text" 
+            id="calibCameraId" 
+            placeholder="CAM_CUSTOM_01" 
+            value="CAM_NEW_ROAD"
+            class="w-36 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-700 focus:outline-none focus:border-slate-800 focus:bg-white transition"
+          />
+        </div>
+
+        <div class="h-5 w-px bg-slate-200 mx-1"></div>
+
+        <!-- Mode Buttons -->
+        <button 
+          id="btnModeRoad" 
+          onclick="setDrawMode('road')" 
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white shadow-xs transition flex items-center gap-1.5"
+        >
+          <span class="w-2 h-2 rounded-full bg-white"></span>
+          Vẽ Lòng đường (ROI)
+        </button>
+        <button 
+          id="btnModeTripwire" 
+          onclick="setDrawMode('tripwire')" 
+          class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition flex items-center gap-1.5"
+        >
+          <span class="w-2 h-2 rounded-full bg-cyan-500"></span>
+          Kẻ Vạch đếm xe
+        </button>
+
+        <div class="h-5 w-px bg-slate-200 mx-1"></div>
+
+        <button 
+          onclick="undoLastAction()" 
+          class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition"
+        >
+          Hoàn tác (Undo)
+        </button>
+        <button 
+          onclick="clearCurrentDrawing()" 
+          class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-300 transition"
+        >
+          Xóa vẽ lại
+        </button>
+
+        <div class="h-5 w-px bg-slate-200 mx-1"></div>
+
+        <!-- Save Button -->
+        <button 
+          id="btnSaveCalibration"
+          onclick="saveCalibrationData()" 
+          class="px-4 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition"
+        >
+          Lưu Định Cỡ
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Canvas Workspace + Sidebar Split -->
+    <div class="flex-1 flex overflow-hidden">
+      
+      <!-- Interactive Drawing Canvas Area -->
+      <div class="flex-1 overflow-auto p-4 flex flex-col items-center justify-center bg-slate-200/60 relative" id="canvasScrollArea">
+        <div id="canvasEmptyPlaceholder" class="text-center p-8 text-slate-400">
+          <p class="text-sm font-semibold text-slate-600">Chưa có khung hình nào được nạp</p>
+          <p class="text-xs text-slate-400 mt-1">Vui lòng chọn video và bấm nút <strong>"Trích xuất Frame"</strong> ở trên để bắt đầu vẽ</p>
+        </div>
+        <canvas id="calibCanvas" class="hidden rounded-lg shadow-md border border-slate-400/80 cursor-crosshair bg-black"></canvas>
+      </div>
+
+      <!-- Right Properties & Inspection Sidebar -->
+      <div class="w-80 bg-white border-l border-slate-200 p-4 flex flex-col overflow-y-auto space-y-4 shrink-0">
+        
+        <div>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Thông số Định cỡ</h3>
+          <p id="calibImageMeta" class="text-xs text-slate-400 mt-0.5">Kích thước: -- x --</p>
+        </div>
+
+        <!-- Road Polygon Status -->
+        <div class="panel-card p-3 rounded-xl space-y-1.5">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-semibold text-slate-800">Đa giác Lòng đường:</span>
+            <span id="calibRoadPtsCount" class="text-emerald-600 font-bold">0 điểm</span>
+          </div>
+          <p class="text-[11px] text-slate-500 leading-tight">
+            Click chuột quanh chu vi lòng đường để tạo polygon khép kín.
+          </p>
+        </div>
+
+        <!-- Tripwires List -->
+        <div class="panel-card p-3 rounded-xl space-y-2 flex-1 flex flex-col">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-semibold text-slate-800">Danh sách Vạch đếm xe:</span>
+            <span id="calibTripwireCount" class="text-cyan-600 font-bold">0 vạch</span>
+          </div>
+          <p class="text-[11px] text-slate-500 leading-tight">
+            Click điểm đầu $\rightarrow$ click điểm cuối để tạo vạch qua từng ngã rẽ.
+          </p>
+          
+          <div id="calibTripwiresList" class="flex-1 overflow-y-auto space-y-1.5 pt-1">
+            <p class="text-xs text-slate-400 italic">Chưa có vạch đếm nào</p>
+          </div>
+        </div>
+
+        <!-- Saved Cameras Registry -->
+        <div class="panel-card p-3 rounded-xl space-y-2">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-semibold text-slate-800">Camera đã lưu trong Cache:</span>
+            <button onclick="loadSavedCamerasList()" class="text-[11px] text-blue-600 hover:underline">Làm mới</button>
+          </div>
+          <div id="savedCamerasList" class="space-y-1 text-xs max-h-36 overflow-y-auto">
+            <p class="text-slate-400 italic">Đang tải...</p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- JAVASCRIPT ENGINE -->
+  <!-- ========================================================================= -->
   <script>
+    // -----------------------------------------------------------------------
+    // NAVIGATION TAB SWITCHER
+    // -----------------------------------------------------------------------
+    function switchMainTab(tabName) {
+      const vOps = document.getElementById('viewOperations');
+      const vCalib = document.getElementById('viewCalibration');
+      const tOps = document.getElementById('navTabOps');
+      const tCalib = document.getElementById('navTabCalib');
+
+      if (tabName === 'calibration') {
+        vOps.classList.add('hidden');
+        vCalib.classList.remove('hidden');
+        tCalib.className = 'px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition';
+        tOps.className = 'px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 transition';
+        loadSavedCamerasList();
+      } else {
+        vCalib.classList.add('hidden');
+        vOps.classList.remove('hidden');
+        tOps.className = 'px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition';
+        tCalib.className = 'px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 transition';
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // TAB 1: CHAT & OPERATIONS SCRIPT
+    // -----------------------------------------------------------------------
     let currentTaskId = null;
     let pollInterval = null;
 
-    // Send Quick Prompt
     function sendQuickPrompt(text) {
       document.getElementById('chatInput').value = text;
       handleChatSubmit(new Event('submit'));
     }
 
-    // Clear Chat
     function clearChat() {
       const container = document.getElementById('chatMessages');
       container.innerHTML = `
@@ -283,7 +478,6 @@
       `;
     }
 
-    // Append Message to Chat
     function appendMessage(sender, text, isMarkdown = false) {
       const container = document.getElementById('chatMessages');
       const isUser = sender === 'user';
@@ -314,7 +508,6 @@
       container.scrollTop = container.scrollHeight;
     }
 
-    // Show Typing Indicator
     function showTyping() {
       const container = document.getElementById('chatMessages');
       const id = 'typingIndicator';
@@ -338,7 +531,6 @@
       if (el) el.remove();
     }
 
-    // Handle Form Submit
     async function handleChatSubmit(e) {
       if (e) e.preventDefault();
       const input = document.getElementById('chatInput');
@@ -365,7 +557,6 @@
           appendMessage('bot', data.reply, true);
         }
 
-        // Nếu có task mới kích hoạt
         if (data.task && data.task.task_id) {
           currentTaskId = data.task.task_id;
           startPolling(currentTaskId);
@@ -379,7 +570,6 @@
       }
     }
 
-    // Poll Task Telemetry
     function startPolling(taskId) {
       if (pollInterval) clearInterval(pollInterval);
       updateTelemetry(taskId);
@@ -394,11 +584,9 @@
         if (!res.ok) return;
         const task = await res.json();
 
-        // Update Header
         document.getElementById('taskTitle').textContent = task.task_id;
         document.getElementById('taskCamera').textContent = task.camera_id;
 
-        // Status Badge & Stop Button
         const statusBadge = document.getElementById('liveStatusBadge');
         const stopBtn = document.getElementById('stopTaskBtn');
 
@@ -423,17 +611,14 @@
           if (pollInterval) clearInterval(pollInterval);
         }
 
-        // Progress Bar
         const pct = task.progress_pct || 0;
         document.getElementById('progressBar').style.width = `${pct}%`;
         document.getElementById('progressText').textContent = `${pct}% (${task.frames_processed}/${task.total_frames || '...'} frames)`;
         document.getElementById('elapsedTime').textContent = `Thời gian: ${task.duration_elapsed_sec || 0}s`;
         document.getElementById('fpsDisplay').textContent = `Tốc độ: ${task.fps_processing || 0} FPS`;
 
-        // Metrics
         const m = task.current_metrics || {};
         
-        // Flood
         const floodTag = document.getElementById('floodStatusTag');
         const st = m.flood_status || 'Chưa xác định';
         floodTag.textContent = st;
@@ -448,7 +633,6 @@
         document.getElementById('floodDepth').textContent = (m.estimated_depth_cm || 0).toFixed(1);
         document.getElementById('waterRatio').textContent = `${((m.water_ratio || 0) * 100).toFixed(1)}%`;
 
-        // Traffic
         const bCounts = m.branch_counts || {};
         const bValues = Object.values(bCounts);
         const branchSum = bValues.reduce((acc, v) => acc + (parseInt(v) || 0), 0);
@@ -464,7 +648,6 @@
           jamTag.textContent = 'Bình thường';
         }
 
-        // Branch Counts
         const branchList = document.getElementById('branchList');
         const bKeys = Object.keys(bCounts);
         document.getElementById('branchSummary').textContent = `${bKeys.length} nhánh`;
@@ -477,7 +660,6 @@
           `).join('');
         }
 
-        // Show Output Video if completed
         if (task.status === 'COMPLETED' && task.output_video_path) {
           const vContainer = document.getElementById('videoContainer');
           const vPlayer = document.getElementById('resultVideo');
@@ -504,7 +686,6 @@
       }
     }
 
-    // Stop currently running task
     async function stopActiveTask() {
       try {
         const url = currentTaskId ? `/api/v1/tasks/${currentTaskId}/stop` : '/api/v1/tasks/stop';
@@ -514,6 +695,418 @@
         if (currentTaskId) updateTelemetry(currentTaskId);
       } catch (err) {
         appendMessage('bot', 'Lỗi khi gửi lệnh dừng tác vụ: ' + err.message);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // TAB 2: CALIBRATION STUDIO SCRIPT (VẼ LÒNG ĐƯỜNG & VẠCH ĐẾM XE)
+    // -----------------------------------------------------------------------
+    let calibImage = new Image();
+    let calibCanvas = document.getElementById('calibCanvas');
+    let ctx = calibCanvas.getContext('2d');
+
+    let currentDrawMode = 'road'; // 'road' or 'tripwire'
+    let roadPolygon = []; // [[x, y], ...]
+    let tripwires = []; // [{ id, name, p1: [x,y], p2: [x,y] }, ...]
+    let tempLineStart = null; // [x, y] for line drawing
+    let mouseHoverPos = null;
+
+    let nativeWidth = 1280;
+    let nativeHeight = 720;
+
+    function setDrawMode(mode) {
+      currentDrawMode = mode;
+      tempLineStart = null;
+      const btnRoad = document.getElementById('btnModeRoad');
+      const btnTw = document.getElementById('btnModeTripwire');
+
+      if (mode === 'road') {
+        btnRoad.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white shadow-xs transition flex items-center gap-1.5';
+        btnTw.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition flex items-center gap-1.5';
+      } else {
+        btnTw.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 text-white shadow-xs transition flex items-center gap-1.5';
+        btnRoad.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition flex items-center gap-1.5';
+      }
+      redrawCanvas();
+    }
+
+    function handleUploadVideoFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById('calibPathInput').value = file.name;
+      extractVideoFrame(file);
+    }
+
+    async function extractVideoFrame(uploadedFile = null) {
+      const btn = document.getElementById('btnExtractFrame');
+      btn.disabled = true;
+      btn.textContent = 'Đang trích xuất...';
+
+      try {
+        const formData = new FormData();
+        if (uploadedFile) {
+          formData.append('video_file', uploadedFile);
+        } else {
+          const path = document.getElementById('calibPathInput').value.trim();
+          formData.append('video_path', path);
+        }
+
+        const res = await fetch('/api/v1/calibration/extract-frame', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Lỗi: ' + (err.detail || 'Không thể trích xuất frame'));
+          return;
+        }
+
+        const data = await res.json();
+        nativeWidth = data.width;
+        nativeHeight = data.height;
+
+        if (data.suggested_camera_id) {
+          document.getElementById('calibCameraId').value = data.suggested_camera_id;
+        }
+
+        document.getElementById('calibImageMeta').textContent = `Độ phân giải: ${nativeWidth} x ${nativeHeight} px`;
+
+        // Load image into canvas
+        calibImage.crossOrigin = "anonymous";
+        calibImage.onload = () => {
+          document.getElementById('canvasEmptyPlaceholder').classList.add('hidden');
+          calibCanvas.classList.remove('hidden');
+          calibCanvas.width = nativeWidth;
+          calibCanvas.height = nativeHeight;
+          redrawCanvas();
+        };
+        calibImage.src = data.image_url;
+
+      } catch (err) {
+        alert('Lỗi kết nối máy chủ: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Trích xuất Frame';
+      }
+    }
+
+    // Canvas Mouse Click Events
+    calibCanvas.addEventListener('mousedown', (e) => {
+      const rect = calibCanvas.getBoundingClientRect();
+      const scaleX = calibCanvas.width / rect.width;
+      const scaleY = calibCanvas.height / rect.height;
+
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
+
+      if (currentDrawMode === 'road') {
+        roadPolygon.push([x, y]);
+        document.getElementById('calibRoadPtsCount').textContent = `${roadPolygon.length} điểm`;
+        redrawCanvas();
+      } else if (currentDrawMode === 'tripwire') {
+        if (!tempLineStart) {
+          tempLineStart = [x, y];
+        } else {
+          const p1 = tempLineStart;
+          const p2 = [x, y];
+          tempLineStart = null;
+
+          const defaultName = `Nhánh ${tripwires.length + 1}`;
+          const name = prompt('Đặt tên cho nhánh vạch kẻ này (VD: Rẽ trái, Đi thẳng):', defaultName);
+          if (name !== null) {
+            const twId = `line_${tripwires.length + 1}`;
+            tripwires.push({
+              id: twId,
+              name: name.trim() || defaultName,
+              p1: p1,
+              p2: p2
+            });
+            updateTripwiresListUI();
+            redrawCanvas();
+          }
+        }
+      }
+    });
+
+    calibCanvas.addEventListener('mousemove', (e) => {
+      const rect = calibCanvas.getBoundingClientRect();
+      const scaleX = calibCanvas.width / rect.width;
+      const scaleY = calibCanvas.height / rect.height;
+      mouseHoverPos = [
+        Math.round((e.clientX - rect.left) * scaleX),
+        Math.round((e.clientY - rect.top) * scaleY)
+      ];
+      if (tempLineStart && currentDrawMode === 'tripwire') {
+        redrawCanvas();
+      }
+    });
+
+    function undoLastAction() {
+      if (currentDrawMode === 'road') {
+        if (roadPolygon.length > 0) {
+          roadPolygon.pop();
+          document.getElementById('calibRoadPtsCount').textContent = `${roadPolygon.length} điểm`;
+          redrawCanvas();
+        }
+      } else {
+        if (tempLineStart) {
+          tempLineStart = null;
+        } else if (tripwires.length > 0) {
+          tripwires.pop();
+          updateTripwiresListUI();
+        }
+        redrawCanvas();
+      }
+    }
+
+    function clearCurrentDrawing() {
+      if (currentDrawMode === 'road') {
+        if (confirm('Xóa toàn bộ điểm lòng đường đã vẽ?')) {
+          roadPolygon = [];
+          document.getElementById('calibRoadPtsCount').textContent = '0 điểm';
+          redrawCanvas();
+        }
+      } else {
+        if (confirm('Xóa toàn bộ các vạch đếm xe?')) {
+          tripwires = [];
+          tempLineStart = null;
+          updateTripwiresListUI();
+          redrawCanvas();
+        }
+      }
+    }
+
+    function removeTripwire(index) {
+      tripwires.splice(index, 1);
+      updateTripwiresListUI();
+      redrawCanvas();
+    }
+
+    function updateTripwiresListUI() {
+      document.getElementById('calibTripwireCount').textContent = `${tripwires.length} vạch`;
+      const listEl = document.getElementById('calibTripwiresList');
+      if (tripwires.length === 0) {
+        listEl.innerHTML = '<p class="text-xs text-slate-400 italic">Chưa có vạch đếm nào</p>';
+        return;
+      }
+      listEl.innerHTML = tripwires.map((tw, idx) => `
+        <div class="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+          <div class="flex items-center gap-1.5 overflow-hidden">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-500 shrink-0"></span>
+            <span class="font-semibold text-slate-800 truncate">${tw.name}</span>
+          </div>
+          <button onclick="removeTripwire(${idx})" class="text-rose-600 hover:text-rose-800 font-bold px-1.5 py-0.5 rounded hover:bg-rose-50 transition">
+            ✕
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function redrawCanvas() {
+      if (!calibImage.complete) return;
+      ctx.clearRect(0, 0, calibCanvas.width, calibCanvas.height);
+      ctx.drawImage(calibImage, 0, 0);
+
+      // Draw Road Polygon (ROI)
+      if (roadPolygon.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(roadPolygon[0][0], roadPolygon[0][1]);
+        for (let i = 1; i < roadPolygon.length; i++) {
+          ctx.lineTo(roadPolygon[i][0], roadPolygon[i][1]);
+        }
+        if (roadPolygon.length >= 3) {
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.28)';
+          ctx.fill();
+        }
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Draw Vertices
+        roadPolygon.forEach((pt, i) => {
+          ctx.beginPath();
+          ctx.arc(pt[0], pt[1], 5, 0, Math.PI * 2);
+          ctx.fillStyle = i === 0 ? '#ef4444' : '#10b981';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        });
+      }
+
+      // Draw Tripwires
+      tripwires.forEach((tw) => {
+        ctx.beginPath();
+        ctx.moveTo(tw.p1[0], tw.p1[1]);
+        ctx.lineTo(tw.p2[0], tw.p2[1]);
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // Endpoints
+        [tw.p1, tw.p2].forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
+          ctx.fillStyle = '#0891b2';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        });
+
+        // Label Badge
+        const midX = (tw.p1[0] + tw.p2[0]) / 2;
+        const midY = (tw.p1[1] + tw.p2[1]) / 2;
+        ctx.font = 'bold 14px Inter, sans-serif';
+        const txt = tw.name;
+        const tMetrics = ctx.measureText(txt);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(midX - 6, midY - 18, tMetrics.width + 12, 24);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(txt, midX, midY);
+      });
+
+      // Draft Tripwire Line
+      if (tempLineStart && mouseHoverPos && currentDrawMode === 'tripwire') {
+        ctx.beginPath();
+        ctx.moveTo(tempLineStart[0], tempLineStart[1]);
+        ctx.lineTo(mouseHoverPos[0], mouseHoverPos[1]);
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.7)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 6]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Save Calibration to FastAPI Backend
+    async function saveCalibrationData() {
+      const camId = document.getElementById('calibCameraId').value.trim();
+      if (!camId) {
+        alert('Vui lòng nhập Mã Camera (Camera ID)!');
+        return;
+      }
+
+      if (roadPolygon.length < 3) {
+        alert('Vui lòng chấm ít nhất 3 điểm để tạo thành lòng đường (Road ROI)!');
+        return;
+      }
+
+      const btn = document.getElementById('btnSaveCalibration');
+      btn.disabled = true;
+      btn.textContent = 'Đang lưu...';
+
+      try {
+        // 1. Lưu Road ROI
+        const roiPayload = {
+          camera_id: camId,
+          road_polygons: [roadPolygon],
+          image_size: [nativeWidth, nativeHeight],
+          curb_buffer_px: 35
+        };
+
+        const resRoi = await fetch('/api/v1/calibration/road-roi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(roiPayload)
+        });
+
+        if (!resRoi.ok) {
+          const e = await resRoi.json();
+          throw new Error('Lỗi lưu Road ROI: ' + (e.detail || resRoi.statusText));
+        }
+
+        // 2. Lưu Tripwires (nếu có)
+        if (tripwires.length > 0) {
+          const twPayload = {
+            camera_id: camId,
+            tripwires: tripwires,
+            image_size: [nativeWidth, nativeHeight]
+          };
+
+          const resTw = await fetch('/api/v1/calibration/tripwires', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(twPayload)
+          });
+
+          if (!resTw.ok) {
+            const e = await resTw.json();
+            throw new Error('Lỗi lưu Tripwires: ' + (e.detail || resTw.statusText));
+          }
+        }
+
+        alert(`✅ Đã lưu định cỡ thành công cho Camera [${camId}]!\n- Lòng đường: ${roadPolygon.length} điểm\n- Vạch đếm xe: ${tripwires.length} nhánh`);
+        loadSavedCamerasList();
+
+      } catch (err) {
+        alert('Lỗi: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Lưu Định Cỡ';
+      }
+    }
+
+    // Load list of calibrated cameras
+    async function loadSavedCamerasList() {
+      const container = document.getElementById('savedCamerasList');
+      try {
+        const res = await fetch('/api/v1/calibration/summary');
+        if (!res.ok) return;
+        const data = await res.json();
+        const cams = data.cameras || [];
+
+        if (cams.length === 0) {
+          container.innerHTML = '<p class="text-slate-400 italic">Chưa có camera nào được định cỡ</p>';
+          return;
+        }
+
+        container.innerHTML = cams.map(c => `
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 transition">
+            <div>
+              <p class="font-bold text-slate-800">${c.camera_id}</p>
+              <p class="text-[10px] text-slate-500">${c.road_area_percentage}% đường • ${c.tripwires_count} vạch</p>
+            </div>
+            <button onclick="loadCameraCalibration('${c.camera_id}')" class="text-blue-600 hover:text-blue-800 font-semibold text-xs px-2 py-1 rounded bg-white border border-slate-200 shadow-2xs">
+              Nạp
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = '<p class="text-rose-500">Lỗi nạp danh sách camera</p>';
+      }
+    }
+
+    async function loadCameraCalibration(camId) {
+      document.getElementById('calibCameraId').value = camId;
+      try {
+        const resRoi = await fetch(`/api/v1/calibration/road-roi/${camId}`);
+        if (resRoi.ok) {
+          const d = await resRoi.json();
+          if (d.road_polygons && d.road_polygons.length > 0) {
+            roadPolygon = d.road_polygons[0];
+            document.getElementById('calibRoadPtsCount').textContent = `${roadPolygon.length} điểm`;
+          }
+        }
+
+        const resTw = await fetch(`/api/v1/calibration/tripwires/${camId}`);
+        if (resTw.ok) {
+          const d = await resTw.json();
+          tripwires = (d.tripwires || []).map(tw => ({
+            id: tw.id,
+            name: tw.name,
+            p1: tw.p1,
+            p2: tw.p2
+          }));
+          updateTripwiresListUI();
+        }
+
+        redrawCanvas();
+        alert(`Đã nạp thông số định cỡ của camera ${camId}`);
+      } catch (e) {
+        alert('Lỗi nạp thông số: ' + e.message);
       }
     }
   </script>

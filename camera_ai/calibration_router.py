@@ -5,8 +5,8 @@ from typing import List, Tuple, Dict, Any, Optional
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import JSONResponse, FileResponse, Response
 
 router = APIRouter()
 
@@ -405,3 +405,73 @@ def list_all_calibrations():
         "total_calibrated_cameras": len(result),
         "cameras": result
     }
+
+
+# =====================================================================
+# FRAME EXTRACTION FOR WEB CALIBRATION TOOL
+# =====================================================================
+
+TEMP_FRAME_PATH = CACHE_DIR / "temp_calibration_frame.jpg"
+
+
+@router.post("/extract-frame", tags=["Calibration Tool"])
+async def extract_first_frame(
+    video_file: Optional[UploadFile] = File(None),
+    video_path: Optional[str] = Form(None)
+):
+    """
+    Trích xuất frame đầu tiên từ video tải lên hoặc từ đường dẫn video trên máy để phục vụ vẽ ROI và Vạch đếm xe.
+    """
+    source_to_open = None
+    suggested_cam_id = "CAM_NEW"
+
+    if video_file and video_file.filename:
+        # Lưu file tạm để OpenCV đọc
+        temp_video = CACHE_DIR / f"temp_upload_{video_file.filename}"
+        with open(temp_video, "wb") as f:
+            content = await video_file.read()
+            f.write(content)
+        source_to_open = str(temp_video)
+        suggested_cam_id = f"CAM_{Path(video_file.filename).stem.upper()}"
+    elif video_path and video_path.strip():
+        # Kiểm tra đường dẫn video trên máy
+        v_str = video_path.strip()
+        candidate = Path(v_str)
+        if not candidate.is_absolute():
+            candidate = WORKSPACE_DIR / v_str
+        if not candidate.exists() and not v_str.startswith(("rtsp://", "http://", "https://")):
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file video tại: {v_str}")
+        source_to_open = str(candidate) if candidate.exists() else v_str
+        suggested_cam_id = f"CAM_{Path(v_str).stem.upper()}"
+    else:
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp video hoặc cung cấp đường dẫn video.")
+
+    cap = cv2.VideoCapture(source_to_open)
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail="Không thể mở tệp video bằng OpenCV.")
+
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret or frame is None:
+        raise HTTPException(status_code=400, detail="Không đọc được khung hình đầu tiên của video.")
+
+    h, w = frame.shape[:2]
+    # Lưu frame dưới dạng JPEG chất lượng cao
+    cv2.imwrite(str(TEMP_FRAME_PATH), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+    return {
+        "status": "success",
+        "image_url": f"/api/v1/calibration/temp-frame?t={int(os.path.getmtime(TEMP_FRAME_PATH))}",
+        "width": w,
+        "height": h,
+        "suggested_camera_id": suggested_cam_id
+    }
+
+
+@router.get("/temp-frame", tags=["Calibration Tool"])
+def get_extracted_temp_frame():
+    """Trả về ảnh frame đầu tiên vừa trích xuất để hiển thị trên Canvas trình duyệt."""
+    if not TEMP_FRAME_PATH.exists():
+        raise HTTPException(status_code=404, detail="Chưa có frame nào được trích xuất.")
+    return FileResponse(str(TEMP_FRAME_PATH), media_type="image/jpeg")
