@@ -30,9 +30,9 @@ def _load_env_keys() -> List[str]:
     return keys
 
 DEFAULT_MODELS = [
-    "qwen/qwen3.8-27b",
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b"
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "qwen/qwen3.8-27b"
 ]
 
 
@@ -42,7 +42,7 @@ class GroqLLMAgent:
     Đảm bảo không bao giờ bị nghẽn rate-limit, tốc độ suy luận siêu tốc (~500 tokens/giây).
     """
 
-    def __init__(self, api_keys: Optional[List[str]] = None, model: str = "qwen/qwen3.8-27b"):
+    def __init__(self, api_keys: Optional[List[str]] = None, model: str = "llama-3.1-8b-instant"):
         self.api_keys = api_keys or _load_env_keys()
         if not self.api_keys:
             print("[GroqLLMAgent] Cảnh báo: Không tìm thấy GROQ_API_KEY trong môi trường hoặc .env!")
@@ -178,4 +178,18 @@ Dữ liệu task hiện tại:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ]
-        return self.call_llm(messages, temperature=0.3)
+        try:
+            return self.call_llm(messages, temperature=0.3)
+        except Exception:
+            st_map = {"RUNNING": "Đang xử lý", "COMPLETED": "Đã hoàn thành", "STOPPED": "Đã dừng", "FAILED": "Gặp sự cố"}
+            status_text = st_map.get(task_info.get("status", "RUNNING"), task_info.get("status"))
+            pct = task_info.get("progress_pct", 0)
+            m = task_info.get("current_metrics", {})
+            return (
+                f"**Báo cáo tiến độ tác vụ {task_info.get('task_id', '')}:**\n\n"
+                f"- **Trạng thái:** `{status_text}` ({pct}%)\n"
+                f"- **Khung hình:** {task_info.get('frames_processed', 0)}/{task_info.get('total_frames', '...')} frames\n"
+                f"- **Mực nước ngập:** ~{m.get('estimated_depth_cm', 0.0)} cm ({m.get('flood_status', 'Không ngập')})\n"
+                f"- **Tổng xe qua vạch:** {m.get('total_vehicles', 0)} phương tiện\n\n"
+                f"*(Bản tin tóm tắt trực tiếp từ dữ liệu máy chủ)*"
+            )
