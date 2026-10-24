@@ -12,9 +12,10 @@ sudo apt-get install -y curl git ufw iptables-persistent netfilter-persistent
 
 echo "🔓 [2/5] Mở cổng Firewall trên máy chủ Oracle (8000, 80, 443)..."
 # Oracle Cloud Ubuntu mặc định chặn mọi cổng ngoài port 22 bằng iptables nội bộ
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8000 -j ACCEPT || true
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT || true
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT || true
+# Đặt ở vị trí đầu tiên (index 1) để đảm bảo không bị chặn bởi bất kỳ rule REJECT nào
+sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT || true
+sudo iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT || true
+sudo iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT || true
 sudo netfilter-persistent save || true
 
 # Mở UFW nếu ufw đang bật
