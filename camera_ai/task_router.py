@@ -163,7 +163,7 @@ def dispatch_task_direct(req: DispatchTaskRequest):
         video_source=req.video_source,
         camera_id=req.camera_id,
         instruction=req.instruction,
-        max_duration_sec=req.max_duration_sec or 60,
+        max_duration_sec=req.max_duration_sec if req.max_duration_sec is not None else 0,
         sample_interval=req.sample_interval or 2
     )
     return task
@@ -198,7 +198,7 @@ async def upload_video_and_dispatch(
         video_source=final_video_source,
         camera_id=camera_id,
         instruction=instruction,
-        max_duration_sec=max_duration_sec or 60,
+        max_duration_sec=max_duration_sec if max_duration_sec is not None else 0,
         sample_interval=sample_interval or 2
     )
 

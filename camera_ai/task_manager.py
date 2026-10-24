@@ -35,7 +35,7 @@ class VideoTaskManager:
         self,
         video_source: str,
         camera_id: str = "CAM_FLOOD_G2",
-        max_duration_sec: int = 60,
+        max_duration_sec: int = 0,
         sample_interval: int = 2,
         action: str = "both",
         instruction: str = "Phân tích tình trạng ngập lụt và đếm xe"
