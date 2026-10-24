@@ -40,7 +40,18 @@ def chat_with_agent(req: ChatRequest):
     3. Trò chuyện và giải đáp thắc mắc.
     """
     recent_tasks = task_manager.list_tasks()
-    analysis = llm_agent.analyze_user_intent(req.message, recent_tasks)
+    try:
+        analysis = llm_agent.analyze_user_intent(req.message, recent_tasks)
+    except Exception:
+        # Heuristic intent parser fallback
+        lower_msg = req.message.lower()
+        if any(w in lower_msg for w in ["dừng", "dung", "hủy", "huy", "stop"]):
+            analysis = {"intent": "STOP_TASK"}
+        elif any(w in lower_msg for w in ["tiến độ", "tien do", "tới đâu", "toi dau", "xong chưa", "xong chua", "trạng thái", "trang thai"]):
+            analysis = {"intent": "CHECK_PROGRESS", "target_task_id": "LATEST"}
+        else:
+            analysis = {"intent": "GENERAL_CHAT"}
+
     intent = analysis.get("intent", "GENERAL_CHAT")
 
     if intent == "STOP_TASK" or any(w in req.message.lower() for w in ["dừng task", "dung task", "hủy task", "huy task", "stop task", "dừng lại", "dừng video"]):
@@ -107,8 +118,21 @@ def chat_with_agent(req: ChatRequest):
                 "task": None
             }
 
-        # Dùng Groq LLM để trả lời tự nhiên theo đúng ngữ cảnh thực tế
-        llm_reply = llm_agent.format_progress_response(target_task, req.message)
+        # Dùng Groq LLM để trả lời tự nhiên theo đúng ngữ cảnh thực tế (có fallback)
+        try:
+            llm_reply = llm_agent.format_progress_response(target_task, req.message)
+        except Exception:
+            st = target_task.get("status", "RUNNING")
+            pct = target_task.get("progress_pct", 0)
+            m = target_task.get("current_metrics", {})
+            llm_reply = (
+                f"**Tiến độ tác vụ {target_task.get('task_id')}:**\n"
+                f"- **Trạng thái:** `{st}` ({pct}%)\n"
+                f"- **Khung hình:** {target_task.get('frames_processed', 0)}/{target_task.get('total_frames', '...')} frames\n"
+                f"- **Mực nước ngập:** ~{m.get('estimated_depth_cm', 0.0)} cm ({m.get('flood_status', 'Không ngập')})\n"
+                f"- **Số lượng xe:** {m.get('total_vehicles', 0)} xe qua vạch"
+            )
+
         return {
             "intent": intent,
             "reply": llm_reply,
@@ -121,7 +145,11 @@ def chat_with_agent(req: ChatRequest):
             {"role": "system", "content": "Bạn là Trợ lý AI SafeRoute thông minh, chuyên hỗ trợ giám sát giao thông đô thị và ngập lụt. Hãy trả lời thân thiện, súc tích bằng tiếng Việt."},
             {"role": "user", "content": req.message}
         ]
-        reply = llm_agent.call_llm(messages)
+        try:
+            reply = llm_agent.call_llm(messages)
+        except Exception:
+            reply = "Chào bạn! Tôi là Trợ lý AI SafeRoute. Bạn có thể giao tác vụ phân tích video giao thông/ngập lụt hoặc hỏi thăm tiến độ các tác vụ đang chạy nhé!"
+
         return {
             "intent": "GENERAL_CHAT",
             "reply": reply,

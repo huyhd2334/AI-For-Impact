@@ -30,8 +30,8 @@ def _load_env_keys() -> List[str]:
     return keys
 
 DEFAULT_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b"
 ]
 
@@ -39,10 +39,10 @@ DEFAULT_MODELS = [
 class GroqLLMAgent:
     """
     LLM Agent tích hợp Groq LPU với cơ chế xoay tua 3 API Keys tự động (Key Rotation & Failover).
-    Đảm bảo không bao giờ bị nghẽn rate-limit, tốc độ suy luận siêu tốc (~500 tokens/giây).
+    Đảm bảo không bao giờ bị nghẽn rate-limit, tốc độ suy luận siêu tốc (~1000 tokens/giây).
     """
 
-    def __init__(self, api_keys: Optional[List[str]] = None, model: str = "llama-3.1-8b-instant"):
+    def __init__(self, api_keys: Optional[List[str]] = None, model: str = "openai/gpt-oss-20b"):
         self.api_keys = api_keys or _load_env_keys()
         if not self.api_keys:
             print("[GroqLLMAgent] Cảnh báo: Không tìm thấy GROQ_API_KEY trong môi trường hoặc .env!")
