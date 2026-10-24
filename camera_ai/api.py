@@ -20,6 +20,7 @@ from .schemas import (
 )
 from .pipeline import UnifiedCameraAnalyzer
 from .calibration_router import router as calibration_router
+from .task_router import task_router
 
 app = FastAPI(
     title="SafeRoute Camera AI Service",
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(calibration_router, prefix="/api/v1/calibration")
+app.include_router(task_router)
 
 # Global unified pipeline instance
 analyzer: Optional[UnifiedCameraAnalyzer] = None
