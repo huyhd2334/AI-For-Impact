@@ -177,8 +177,11 @@ class VideoTaskManager:
                 tripwire_counts = {}
                 v_detector = getattr(analyzer, 'vehicle_detector', None)
                 if v_detector:
-                    total_veh = getattr(v_detector, 'total_count', 0)
-                    tripwire_counts = getattr(v_detector, 'tripwire_counts', {})
+                    tripwire_counts = dict(getattr(v_detector, 'tripwire_counts', {}))
+                    if tripwire_counts:
+                        total_veh = sum(tripwire_counts.values())
+                    else:
+                        total_veh = len(getattr(v_detector, 'tracked_vehicles', {}))
                 else:
                     total_veh = 0
 
@@ -224,6 +227,14 @@ class VideoTaskManager:
                     self._tasks[task_id]["progress_pct"] = 100.0
                     self._tasks[task_id]["duration_elapsed_sec"] = round(elapsed_final, 1)
                     self._tasks[task_id]["updated_at"] = datetime.now().isoformat()
+                    self._tasks[task_id]["current_metrics"] = {
+                        "flood_status": last_flood_status,
+                        "estimated_depth_cm": round(last_depth_cm, 1),
+                        "water_ratio": round(last_water_ratio, 3),
+                        "total_vehicles": total_veh,
+                        "branch_counts": tripwire_counts,
+                        "is_jammed": getattr(obs_event, 'congestion_level', 'LOW') in ['HIGH', 'JAMMED'] if obs_event else False
+                    }
 
     @staticmethod
     def _convert_to_web_h264(video_path: str):

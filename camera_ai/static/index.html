@@ -431,7 +431,12 @@
         document.getElementById('waterRatio').textContent = `${((m.water_ratio || 0) * 100).toFixed(1)}%`;
 
         // Traffic
-        document.getElementById('totalVehicles').textContent = m.total_vehicles || 0;
+        const bCounts = m.branch_counts || {};
+        const bValues = Object.values(bCounts);
+        const branchSum = bValues.reduce((acc, v) => acc + (parseInt(v) || 0), 0);
+        const totalVeh = branchSum > 0 ? branchSum : (m.total_vehicles || 0);
+        document.getElementById('totalVehicles').textContent = totalVeh;
+
         const jamTag = document.getElementById('jamTag');
         if (m.is_jammed) {
           jamTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-medium';
@@ -443,7 +448,6 @@
 
         // Branch Counts
         const branchList = document.getElementById('branchList');
-        const bCounts = m.branch_counts || {};
         const bKeys = Object.keys(bCounts);
         document.getElementById('branchSummary').textContent = `${bKeys.length} nhánh`;
 
