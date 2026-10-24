@@ -8,7 +8,8 @@ import numpy as np
 import torch
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .schemas import (
     CameraObservationEvent,
@@ -38,6 +39,28 @@ app.add_middleware(
 
 app.include_router(calibration_router, prefix="/api/v1/calibration")
 app.include_router(task_router)
+
+# Mount thư mục giao diện Web Demo và outputs video
+static_dir = Path(__file__).resolve().parent / "static"
+outputs_dir = Path(__file__).resolve().parent.parent / "outputs"
+outputs_dir.mkdir(parents=True, exist_ok=True)
+
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+if outputs_dir.exists():
+    app.mount("/outputs", StaticFiles(directory=str(outputs_dir)), name="outputs")
+
+
+@app.get("/", response_class=HTMLResponse, tags=["Web UI Demo"])
+@app.get("/demo", response_class=HTMLResponse, tags=["Web UI Demo"])
+def serve_demo_ui():
+    """Giao diện Web trực quan để demo tương tác với Groq LLM Agent và theo dõi tiến độ video"""
+    html_file = static_dir / "index.html"
+    if html_file.exists():
+        with open(html_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>SafeRoute AI Service is Running. Visit /docs for API.</h1>"
 
 # Global unified pipeline instance
 analyzer: Optional[UnifiedCameraAnalyzer] = None
