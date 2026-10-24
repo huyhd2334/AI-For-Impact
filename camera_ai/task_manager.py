@@ -215,12 +215,43 @@ class VideoTaskManager:
             writer.release()
             elapsed_final = time.time() - t_start
 
+            # Tự động convert sang H.264 web format để trình duyệt phát mượt mà
+            self._convert_to_web_h264(out_path)
+
             with self._lock:
                 if task_id in self._tasks and self._tasks[task_id]["status"] != "FAILED":
                     self._tasks[task_id]["status"] = "COMPLETED"
                     self._tasks[task_id]["progress_pct"] = 100.0
                     self._tasks[task_id]["duration_elapsed_sec"] = round(elapsed_final, 1)
                     self._tasks[task_id]["updated_at"] = datetime.now().isoformat()
+
+    @staticmethod
+    def _convert_to_web_h264(video_path: str):
+        """Chuyển đổi video sang H.264 (yuv420p) để trình duyệt web phát được qua HTML5 <video>"""
+        try:
+            import subprocess
+            try:
+                import imageio_ffmpeg
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                ffmpeg_exe = "ffmpeg"
+            
+            src = Path(video_path)
+            if not src.exists() or src.stat().st_size == 0:
+                return
+
+            temp_path = src.parent / f"web_{src.name}"
+            cmd = [
+                ffmpeg_exe, "-y", "-i", str(src),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-preset", "ultrafast", "-movflags", "+faststart",
+                str(temp_path)
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode == 0 and temp_path.exists():
+                temp_path.replace(src)
+        except Exception as e:
+            print(f"[TaskManager] Cảnh báo convert H.264 web video: {e}")
 
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:

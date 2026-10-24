@@ -250,12 +250,17 @@
 
         <!-- Video Player Container -->
         <div id="videoContainer" class="hidden pt-3 border-t border-slate-800 space-y-2">
-          <p class="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
-            <i class="fa-solid fa-circle-check"></i>
-            Video phân tích đã hoàn tất:
-          </p>
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-check"></i>
+              Video phân tích đã hoàn tất:
+            </p>
+            <a id="downloadVideoBtn" href="#" download class="text-xs px-2.5 py-1 rounded-lg bg-emerald-600/30 text-emerald-400 hover:bg-emerald-600/50 border border-emerald-500/40 flex items-center gap-1 transition">
+              <i class="fa-solid fa-download"></i> Tải MP4
+            </a>
+          </div>
           <div class="rounded-xl overflow-hidden bg-black/60 border border-slate-700 aspect-video flex items-center justify-center">
-            <video id="resultVideo" controls class="w-full h-full object-contain"></video>
+            <video id="resultVideo" controls playsinline preload="auto" class="w-full h-full object-contain"></video>
           </div>
         </div>
       </div>
@@ -480,8 +485,21 @@
         if (task.status === 'COMPLETED' && task.output_video_path) {
           const vContainer = document.getElementById('videoContainer');
           const vPlayer = document.getElementById('resultVideo');
+          const dlBtn = document.getElementById('downloadVideoBtn');
           const filename = task.output_video_path.split(/[\\/]/).pop();
-          vPlayer.src = `/outputs/${filename}`;
+          const targetUrl = `/outputs/${filename}`;
+
+          if (vPlayer.getAttribute('data-loaded-src') !== targetUrl) {
+            vPlayer.setAttribute('data-loaded-src', targetUrl);
+            vPlayer.src = targetUrl;
+            vPlayer.load();
+          }
+
+          if (dlBtn) {
+            dlBtn.href = targetUrl;
+            dlBtn.download = filename;
+          }
+
           vContainer.classList.remove('hidden');
         }
 
