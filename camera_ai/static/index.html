@@ -155,30 +155,30 @@
             </div>
           </div>
 
-          <!-- Row 2: Cấu hình Thời lượng & Tốc độ lấy mẫu -->
+          <!-- Row 2: Cấu hình Thời lượng & Tốc độ lấy mẫu (Chuẩn chuyên ngành) -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-500 mb-1">3. Thời lượng phân tích:</label>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">3. Phạm vi Phân tích (Duration Scope):</label>
               <select 
                 id="dispatchDurationSelect" 
                 class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-slate-800 transition"
               >
-                <option value="0" selected>Toàn bộ video (Hết file video)</option>
-                <option value="60">Giới hạn 60 giây</option>
-                <option value="120">Giới hạn 120 giây (2 phút)</option>
-                <option value="300">Giới hạn 300 giây (5 phút)</option>
+                <option value="0" selected>Toàn chuỗi khung hình (Full Stream / EOF)</option>
+                <option value="60">Cửa sổ 60s (Window: 60s)</option>
+                <option value="120">Cửa sổ 120s (Window: 120s)</option>
+                <option value="300">Cửa sổ 300s (Window: 300s)</option>
               </select>
             </div>
             <div>
-              <label class="block text-[11px] font-semibold text-slate-500 mb-1">4. Lấy mẫu khung hình (Tốc độ):</label>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">4. Tần suất Trích mẫu (Sampling Step):</label>
               <select 
                 id="dispatchSampleSelect" 
                 class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-slate-800 transition"
               >
-                <option value="2">Mỗi 2 frames (Mặc định - Chuẩn xác)</option>
-                <option value="5" selected>Mỗi 5 frames (Nhanh gấp đôi • Khuyên dùng)</option>
-                <option value="10">Mỗi 10 frames (Siêu tốc độ cho video dài)</option>
-                <option value="1">Mọi frames (Tỉ mỉ nhất)</option>
+                <option value="5" selected>Bước nhảy 5 frames (Step = 5 • Tối ưu hiệu năng)</option>
+                <option value="2">Bước nhảy 2 frames (Step = 2 • Tiêu chuẩn)</option>
+                <option value="10">Bước nhảy 10 frames (Step = 10 • Xử lý nhanh)</option>
+                <option value="1">Toàn bộ frames (Step = 1 • Không bỏ khung)</option>
               </select>
             </div>
           </div>
