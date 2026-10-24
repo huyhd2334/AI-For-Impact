@@ -1,4 +1,7 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+import os
+import uuid
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
@@ -10,6 +13,9 @@ task_router = APIRouter(prefix="/api/v1", tags=["LLM Agent & Video Task Manageme
 # Khởi tạo singleton manager và LLM agent
 task_manager = VideoTaskManager()
 llm_agent = GroqLLMAgent()
+
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "outputs" / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class ChatRequest(BaseModel):
@@ -133,6 +139,46 @@ def dispatch_task_direct(req: DispatchTaskRequest):
         sample_interval=req.sample_interval or 2
     )
     return task
+
+
+@task_router.post("/tasks/upload-and-dispatch", summary="Tải lên video và chọn cấu hình Segment/Camera tương ứng để phân tích")
+async def upload_video_and_dispatch(
+    video_file: Optional[UploadFile] = File(None),
+    video_path: Optional[str] = Form(None),
+    camera_id: str = Form("CAM_FLOOD_G2"),
+    instruction: Optional[str] = Form("Phân tích ngập úng và đếm xe theo cấu hình segment"),
+    max_duration_sec: Optional[int] = Form(60),
+    sample_interval: Optional[int] = Form(2)
+):
+    """
+    Cho phép người dùng upload file video (hoặc trỏ đường dẫn file) và gán trực tiếp cấu hình Camera Segment tương ứng.
+    """
+    final_video_source = None
+    if video_file and video_file.filename:
+        safe_filename = f"{uuid.uuid4().hex[:6]}_{video_file.filename}"
+        dest_path = UPLOAD_DIR / safe_filename
+        with open(dest_path, "wb") as f:
+            content = await video_file.read()
+            f.write(content)
+        final_video_source = str(dest_path)
+    elif video_path and video_path.strip():
+        final_video_source = video_path.strip()
+    else:
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp video hoặc cung cấp đường dẫn video.")
+
+    task = task_manager.dispatch_task(
+        video_source=final_video_source,
+        camera_id=camera_id,
+        instruction=instruction,
+        max_duration_sec=max_duration_sec or 60,
+        sample_interval=sample_interval or 2
+    )
+
+    return {
+        "status": "success",
+        "task": task,
+        "message": f"Đã khởi chạy tác vụ {task['task_id']} thành công với camera {camera_id}!"
+    }
 
 
 @task_router.post("/tasks/{task_id}/stop", summary="Dừng một Task đang chạy ngầm")

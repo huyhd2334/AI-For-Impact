@@ -99,6 +99,75 @@
         </button>
       </div>
 
+      <!-- Direct Dispatch Panel: Nạp Video & Chọn Cấu hình Segment tương ứng -->
+      <div class="px-5 py-3 border-b border-slate-200 bg-slate-50/90 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+            Nạp Video & Chọn Cấu hình Segment
+          </span>
+          <button onclick="toggleDispatchPanel()" id="btnToggleDispatch" class="text-xs text-slate-500 hover:text-slate-800 transition">
+            Thu gọn
+          </button>
+        </div>
+
+        <div id="dispatchPanelBody" class="space-y-2.5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <!-- 1. Tệp Video đầu vào -->
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">1. Tệp Video đầu vào:</label>
+              <div class="flex items-center gap-1.5">
+                <label class="cursor-pointer px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold shrink-0 transition shadow-2xs">
+                  Tải file
+                  <input type="file" id="dispatchFileInput" accept="video/*" class="hidden" onchange="handleDispatchFileSelect(event)">
+                </label>
+                <input 
+                  type="text" 
+                  id="dispatchPathInput" 
+                  placeholder="data_test/flood_g2_0190_3e225b42.mp4" 
+                  value="data_test/flood_g2_0190_3e225b42.mp4"
+                  class="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-800 transition"
+                />
+              </div>
+            </div>
+
+            <!-- 2. Chọn Segment / Camera tương ứng -->
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">2. Chọn Segment / Camera tương ứng:</label>
+              <div class="flex items-center gap-1.5">
+                <select 
+                  id="dispatchCameraSelect" 
+                  class="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-700 focus:outline-none focus:border-slate-800 transition"
+                >
+                  <option value="CAM_FLOOD_G2">CAM_FLOOD_G2 (Ngập đi được • 2 vạch)</option>
+                  <option value="CAM_FLOOD_G0">CAM_FLOOD_G0 (Đường khô • 3 vạch)</option>
+                  <option value="CAM_FLOOD_G1">CAM_FLOOD_G1 (Đường khô • 4 vạch)</option>
+                  <option value="CAM_FLOOD_G3">CAM_FLOOD_G3 (Ngập sâu • 1 vạch)</option>
+                </select>
+                <button 
+                  onclick="loadAvailableCameraSegments()" 
+                  title="Tải lại danh sách camera" 
+                  class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 hover:text-slate-900 text-xs transition"
+                >
+                  ↻
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-0.5">
+            <span class="text-[11px] text-slate-500">Mô hình sẽ dùng đúng Lòng đường và Vạch đếm của camera đã chọn</span>
+            <button 
+              id="btnRunDispatch"
+              onclick="submitUploadAndDispatch()" 
+              class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs"
+            >
+              Khởi chạy Phân tích
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Quick Action Prompt Chips -->
       <div class="px-5 py-2.5 bg-slate-50/80 border-b border-slate-200/80 flex items-center gap-2 overflow-x-auto text-xs">
         <span class="text-slate-400 font-medium shrink-0">Lệnh mẫu:</span>
@@ -453,6 +522,102 @@
         tCalib.className = 'px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 transition';
       }
     }
+
+    // -----------------------------------------------------------------------
+    // DISPATCH PANEL: UPLOAD VIDEO & SELECT SEGMENT
+    // -----------------------------------------------------------------------
+    let selectedDispatchFile = null;
+
+    function toggleDispatchPanel() {
+      const body = document.getElementById('dispatchPanelBody');
+      const btn = document.getElementById('btnToggleDispatch');
+      if (body.classList.contains('hidden')) {
+        body.classList.remove('hidden');
+        btn.textContent = 'Thu gọn';
+      } else {
+        body.classList.add('hidden');
+        btn.textContent = 'Mở rộng';
+      }
+    }
+
+    function handleDispatchFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      selectedDispatchFile = file;
+      document.getElementById('dispatchPathInput').value = file.name;
+    }
+
+    async function loadAvailableCameraSegments() {
+      try {
+        const res = await fetch('/api/v1/calibration/summary');
+        if (!res.ok) return;
+        const data = await res.json();
+        const cams = data.cameras || [];
+        const select = document.getElementById('dispatchCameraSelect');
+        if (cams.length > 0 && select) {
+          const currentVal = select.value;
+          select.innerHTML = cams.map(c => `
+            <option value="${c.camera_id}">
+              ${c.camera_id} (${c.road_area_percentage}% đường • ${c.tripwires_count} vạch)
+            </option>
+          `).join('');
+          if (currentVal && cams.some(c => c.camera_id === currentVal)) {
+            select.value = currentVal;
+          }
+        }
+      } catch (err) {
+        console.error('Error loading camera segments:', err);
+      }
+    }
+
+    async function submitUploadAndDispatch() {
+      const btn = document.getElementById('btnRunDispatch');
+      btn.disabled = true;
+      btn.textContent = 'Đang khởi chạy...';
+
+      const camId = document.getElementById('dispatchCameraSelect').value;
+      const path = document.getElementById('dispatchPathInput').value.trim();
+
+      try {
+        const formData = new FormData();
+        if (selectedDispatchFile) {
+          formData.append('video_file', selectedDispatchFile);
+        } else {
+          formData.append('video_path', path);
+        }
+        formData.append('camera_id', camId);
+        formData.append('instruction', `Phân tích video theo cấu hình camera ${camId}`);
+
+        const res = await fetch('/api/v1/tasks/upload-and-dispatch', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const e = await res.json();
+          throw new Error(e.detail || res.statusText);
+        }
+
+        const data = await res.json();
+        const task = data.task;
+        currentTaskId = task.task_id;
+        startPolling(currentTaskId);
+
+        const vName = selectedDispatchFile ? selectedDispatchFile.name : path.split(/[\\/]/).pop();
+        appendMessage('bot', `**Đã khởi chạy tác vụ phân tích:**\n- **Mã tác vụ:** \`${task.task_id}\`\n- **Nguồn:** \`${vName}\`\n- **Cấu hình Segment:** \`${camId}\`\n- **Trạng thái:** Đang xử lý khung hình ngầm...`);
+
+      } catch (err) {
+        alert('Lỗi khởi chạy tác vụ: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Khởi chạy Phân tích';
+        selectedDispatchFile = null;
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadAvailableCameraSegments();
+    });
 
     // -----------------------------------------------------------------------
     // TAB 1: CHAT & OPERATIONS SCRIPT
@@ -1038,8 +1203,16 @@
           }
         }
 
-        alert(`✅ Đã lưu định cỡ thành công cho Camera [${camId}]!\n- Lòng đường: ${roadPolygon.length} điểm\n- Vạch đếm xe: ${tripwires.length} nhánh`);
         loadSavedCamerasList();
+        loadAvailableCameraSegments();
+
+        if (confirm(`Đã lưu định cỡ thành công cho Camera [${camId}]!\n- Lòng đường: ${roadPolygon.length} điểm\n- Vạch đếm xe: ${tripwires.length} nhánh\n\nBạn có muốn chuyển sang màn hình Giám sát để chạy phân tích Video với Camera này ngay không?`)) {
+          switchMainTab('operations');
+          setTimeout(() => {
+            const sel = document.getElementById('dispatchCameraSelect');
+            if (sel) sel.value = camId;
+          }, 300);
+        }
 
       } catch (err) {
         alert('Lỗi: ' + err.message);
