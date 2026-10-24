@@ -139,6 +139,9 @@ class VideoTaskManager:
         last_flood_status = "CHƯA XÁC ĐỊNH"
         last_depth_cm = 0.0
         last_water_ratio = 0.0
+        total_veh = 0
+        tripwire_counts = {}
+        obs_event = None
 
         try:
             while cap.isOpened():
