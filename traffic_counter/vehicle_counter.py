@@ -63,6 +63,9 @@ class VehicleDetector:
                 if os.path.exists(c):
                     model_path = c
                     break
+            else:
+                # Tự động dùng yolov8n.pt chuẩn để Ultralytics tự tải từ cloud nếu chưa có weight chuyên biệt
+                model_path = "yolov8n.pt"
 
         try:
             import torch

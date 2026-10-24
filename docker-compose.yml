@@ -16,6 +16,9 @@ services:
     env_file:
       - .env
     volumes:
+      # Mount source code trực tiếp để git pull là ăn ngay lập tức
+      - ./camera_ai:/app/camera_ai
+      - ./traffic_counter:/app/traffic_counter
       # Mount cache định cỡ đường và vạch đếm xe
       - ./road_segmentation/cache:/app/road_segmentation/cache
       # Mount weights từ máy chủ vào container (tránh mất file khi rebuild)
