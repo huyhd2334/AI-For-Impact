@@ -162,8 +162,9 @@ class VideoTaskManager:
                         print(f"[TaskManager] Tác vụ {task_id} đã nhận lệnh dừng từ người dùng.")
                         break
 
-                # Dừng nếu vượt quá thời lượng cho phép đối với livestream
-                if elapsed > max_duration_sec:
+                # Dừng nếu vượt quá thời lượng cho phép (chỉ khi max_duration_sec > 0 được thiết lập)
+                if max_duration_sec and max_duration_sec > 0 and elapsed > max_duration_sec:
+                    print(f"[TaskManager] Tác vụ {task_id} đã đạt giới hạn thời lượng cấu hình ({max_duration_sec}s).")
                     break
 
                 # Thực hiện phân tích khung hình bằng Unified Analyzer

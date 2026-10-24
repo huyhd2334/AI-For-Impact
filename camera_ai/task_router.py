@@ -147,7 +147,7 @@ async def upload_video_and_dispatch(
     video_path: Optional[str] = Form(None),
     camera_id: str = Form("CAM_FLOOD_G2"),
     instruction: Optional[str] = Form("Phân tích ngập úng và đếm xe theo cấu hình segment"),
-    max_duration_sec: Optional[int] = Form(60),
+    max_duration_sec: Optional[int] = Form(0),
     sample_interval: Optional[int] = Form(2)
 ):
     """

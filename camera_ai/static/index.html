@@ -155,12 +155,40 @@
             </div>
           </div>
 
-          <div class="flex items-center justify-between pt-0.5">
+          <!-- Row 2: Cấu hình Thời lượng & Tốc độ lấy mẫu -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">3. Thời lượng phân tích:</label>
+              <select 
+                id="dispatchDurationSelect" 
+                class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-slate-800 transition"
+              >
+                <option value="0" selected>Toàn bộ video (Hết file video)</option>
+                <option value="60">Giới hạn 60 giây</option>
+                <option value="120">Giới hạn 120 giây (2 phút)</option>
+                <option value="300">Giới hạn 300 giây (5 phút)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 mb-1">4. Lấy mẫu khung hình (Tốc độ):</label>
+              <select 
+                id="dispatchSampleSelect" 
+                class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-slate-800 transition"
+              >
+                <option value="2">Mỗi 2 frames (Mặc định - Chuẩn xác)</option>
+                <option value="5" selected>Mỗi 5 frames (Nhanh gấp đôi • Khuyên dùng)</option>
+                <option value="10">Mỗi 10 frames (Siêu tốc độ cho video dài)</option>
+                <option value="1">Mọi frames (Tỉ mỉ nhất)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-1">
             <span class="text-[11px] text-slate-500">Mô hình sẽ dùng đúng Lòng đường và Vạch đếm của camera đã chọn</span>
             <button 
               id="btnRunDispatch"
               onclick="submitUploadAndDispatch()" 
-              class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs"
+              class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
             >
               Khởi chạy Phân tích
             </button>
@@ -277,34 +305,40 @@
       <div class="grid grid-cols-2 gap-4">
         
         <!-- Flood Gauge Card -->
-        <div class="panel-card rounded-2xl p-4 space-y-2">
+        <div class="panel-card rounded-2xl p-4 space-y-2 bg-gradient-to-br from-sky-50/50 to-white border border-sky-100/80 shadow-2xs">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-500">Mức độ Ngập</span>
-            <span id="floodStatusTag" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium border border-slate-200">--</span>
+            <span class="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+              Mức độ Ngập
+            </span>
+            <span id="floodStatusTag" class="text-[11px] px-2 py-0.5 rounded-full bg-white text-slate-600 font-semibold border border-slate-200">--</span>
           </div>
           <div class="flex items-baseline gap-1.5 pt-1">
-            <span id="floodDepth" class="text-3xl font-bold tracking-tight text-slate-900">0.0</span>
+            <span id="floodDepth" class="text-3xl font-extrabold tracking-tight text-slate-900">0.0</span>
             <span class="text-xs text-slate-500 font-medium">cm</span>
           </div>
-          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-slate-100">
+          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-sky-100/70">
             <span>Tỷ lệ mặt nước:</span>
-            <span id="waterRatio" class="text-slate-800 font-semibold">0.0%</span>
+            <span id="waterRatio" class="text-slate-800 font-bold">0.0%</span>
           </div>
         </div>
 
         <!-- Traffic Counter Card -->
-        <div class="panel-card rounded-2xl p-4 space-y-2">
+        <div class="panel-card rounded-2xl p-4 space-y-2 bg-gradient-to-br from-emerald-50/40 to-white border border-emerald-100/80 shadow-2xs">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-500">Lưu lượng Giao thông</span>
-            <span id="jamTag" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium border border-slate-200">Bình thường</span>
+            <span class="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              Lưu lượng Giao thông
+            </span>
+            <span id="jamTag" class="text-[11px] px-2 py-0.5 rounded-full bg-white text-emerald-700 font-semibold border border-emerald-200">Bình thường</span>
           </div>
           <div class="flex items-baseline gap-1.5 pt-1">
-            <span id="totalVehicles" class="text-3xl font-bold tracking-tight text-slate-900">0</span>
+            <span id="totalVehicles" class="text-3xl font-extrabold tracking-tight text-slate-900">0</span>
             <span class="text-xs text-slate-500 font-medium">xe đã qua</span>
           </div>
-          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-slate-100">
+          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-emerald-100/70">
             <span>Nhánh vạch kẻ:</span>
-            <span id="branchSummary" class="text-slate-800 font-semibold">0 nhánh</span>
+            <span id="branchSummary" class="text-slate-800 font-bold">0 nhánh</span>
           </div>
         </div>
 
@@ -587,6 +621,11 @@
         }
         formData.append('camera_id', camId);
         formData.append('instruction', `Phân tích video theo cấu hình camera ${camId}`);
+
+        const durVal = parseInt(document.getElementById('dispatchDurationSelect')?.value) || 0;
+        const sampVal = parseInt(document.getElementById('dispatchSampleSelect')?.value) || 2;
+        formData.append('max_duration_sec', durVal);
+        formData.append('sample_interval', sampVal);
 
         const res = await fetch('/api/v1/tasks/upload-and-dispatch', {
           method: 'POST',
