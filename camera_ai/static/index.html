@@ -810,7 +810,7 @@
           if (pollInterval) clearInterval(pollInterval);
         } else if (task.status === 'FAILED') {
           statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200';
-          statusBadge.textContent = 'Gặp lỗi';
+          statusBadge.textContent = task.error ? `Lỗi: ${task.error}` : 'Gặp lỗi';
           if (stopBtn) stopBtn.classList.add('hidden');
           if (pollInterval) clearInterval(pollInterval);
         }

@@ -230,12 +230,15 @@ class CameraResultFusion:
         cv2.rectangle(annotated, (10, 10), (min(w - 10, int(860 * hud_scale)), banner_h), (20, 20, 20), -1)
         cv2.rectangle(annotated, (10, 10), (min(w - 10, int(860 * hud_scale)), banner_h), hud_color, 2)
 
-        flood_text_ascii = {
-            FinalFloodStatus.NO_FLOOD: "KHONG NGAP",
-            FinalFloodStatus.PASSABLE_FLOOD: "NGAP DI DUOC",
-            FinalFloodStatus.HEAVY_FLOOD: "NGAP SAU (NGUY HIEM)",
-            FinalFloodStatus.UNCERTAIN: "CHUA XAC DINH"
-        }.get(flood_status_vn, "KHONG NGAP")
+        vn_str = str(getattr(flood_status_vn, 'value', flood_status_vn) or "").lower()
+        if any(w in vn_str for w in ["nhiều", "heavy", "sâu", "deep"]):
+            flood_text_ascii = "NGAP SAU (NGUY HIEM)"
+        elif any(w in vn_str for w in ["được", "passable", "vừa", "nhẹ"]):
+            flood_text_ascii = "NGAP DI DUOC"
+        elif any(w in vn_str for w in ["chưa", "unknown", "uncertain"]):
+            flood_text_ascii = "CHUA XAC DINH"
+        else:
+            flood_text_ascii = "KHONG NGAP"
         flood_badge = f"NGAP: {flood_text_ascii}"
         if depth_cm is not None:
             flood_badge += f" | ~{depth_cm:.1f}cm"

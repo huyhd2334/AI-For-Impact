@@ -220,6 +220,8 @@ class VideoTaskManager:
                             }
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             with self._lock:
                 if task_id in self._tasks:
                     self._tasks[task_id]["status"] = "FAILED"
