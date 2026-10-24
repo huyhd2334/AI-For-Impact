@@ -13,6 +13,8 @@ services:
       - TORCH_NUM_THREADS=4
       - OMP_NUM_THREADS=4
       - WORKERS=2
+    env_file:
+      - .env
     volumes:
       # Mount cache định cỡ đường và vạch đếm xe
       - ./road_segmentation/cache:/app/road_segmentation/cache

@@ -36,6 +36,11 @@ fi
 echo "📁 [4/5] Chuẩn bị thư mục chứa weights và cache..."
 mkdir -p weights road_segmentation/cache outputs
 
+if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+    echo "Tạo file .env từ template .env.example..."
+    cp .env.example .env
+fi
+
 if [ ! -f "weights/linknet_water_clean.pth" ]; then
     echo "⚠️ CHÚ Ý: Chưa tìm thấy file weights/linknet_water_clean.pth!"
     echo "Vui lòng copy file từ máy local lên server bằng lệnh:"
