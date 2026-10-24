@@ -41,8 +41,8 @@ COPY . .
 # 4. Đảm bảo các thư mục dữ liệu, cache và weights luôn tồn tại
 RUN mkdir -p weights road_segmentation/cache outputs
 
-# Cổng mặc định của FastAPI
+# Cổng mặc định
 EXPOSE 8000
 
-# Khởi chạy FastAPI với Uvicorn (dùng 2-4 workers tận dụng 4 OCPU của Oracle Ampere A1)
-CMD ["uvicorn", "camera_ai.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Khởi chạy FastAPI với Uvicorn (nhận biến $PORT từ Cloud như Render/Koyeb nếu có, mặc định 8000)
+CMD ["sh", "-c", "uvicorn camera_ai.api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
