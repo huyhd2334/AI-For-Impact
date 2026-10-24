@@ -1,147 +1,117 @@
 <!DOCTYPE html>
-<html lang="vi" class="h-full bg-slate-900 text-slate-100">
+<html lang="vi" class="h-full bg-slate-50 text-slate-900">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SafeRoute AI - Điều Phối Thông Minh & Giám Sát Đô Thị</title>
+  <title>SafeRoute - Hệ thống Điều phối & Giám sát Giao thông Đô thị</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- FontAwesome Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Marked.js for markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f0fdf4',
-              500: '#22c55e',
-              600: '#16a34a',
-              700: '#15803d',
-            }
-          }
-        }
-      }
-    }
-  </script>
   <style>
     /* Custom scrollbar */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
-    ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 9999px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 1); }
-    .glass-card {
-      background: rgba(30, 41, 59, 0.7);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .pulse-glow {
-      box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .card-base {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
     }
   </style>
 </head>
-<body class="h-full flex flex-col font-sans antialiased overflow-hidden">
+<body class="h-full flex flex-col font-sans antialiased overflow-hidden bg-slate-50 text-slate-900">
 
   <!-- Top Navigation Bar -->
-  <header class="bg-slate-900/90 border-b border-slate-800 px-6 py-3 flex items-center justify-between z-10">
+  <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between z-10">
     <div class="flex items-center space-x-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-        <i class="fa-solid fa-shield-halved text-white text-lg"></i>
+      <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
+        SR
       </div>
       <div>
-        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-          SafeRoute <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">AI Agent Live</span>
+        <h1 class="text-base font-bold text-slate-900 flex items-center gap-2">
+          SafeRoute Operations Center
+          <span class="text-[11px] font-medium px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Hệ thống Trực tuyến</span>
         </h1>
-        <p class="text-xs text-slate-400">Giám sát giao thông đô thị & Cảnh báo ngập úng thời gian thực</p>
+        <p class="text-xs text-slate-500">Giám sát giao thông đô thị & Phân tích ngập úng tự động</p>
       </div>
     </div>
     
-    <div class="flex items-center space-x-4">
-      <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-xs">
-        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-        <span class="text-slate-300 font-medium">Groq LPU (3x Keys Active)</span>
-      </div>
-      <a href="/docs" target="_blank" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition flex items-center gap-1.5">
-        <i class="fa-solid fa-code"></i>
-        <span>API Docs</span>
+    <div class="flex items-center space-x-3">
+      <span class="text-xs text-slate-500 font-medium border-r border-slate-200 pr-3">
+        Engine: Groq High-Speed LPU
+      </span>
+      <a href="/docs" target="_blank" class="px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 border border-slate-200 transition">
+        API Documentation
       </a>
     </div>
   </header>
 
-  <!-- Main Content Split (Chat & Live Dashboard) -->
+  <!-- Main Content Split -->
   <main class="flex-1 flex overflow-hidden">
     
     <!-- LEFT: Conversational Agent Chat -->
-    <section class="w-full lg:w-1/2 flex flex-col border-r border-slate-800 bg-slate-950/40">
+    <section class="w-full lg:w-1/2 flex flex-col border-r border-slate-200 bg-white">
       
       <!-- Chat Header -->
-      <div class="p-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/40">
-        <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
-            <i class="fa-solid fa-robot"></i>
-          </div>
-          <div>
-            <h2 class="text-sm font-semibold text-white">SafeRoute Assistant</h2>
-            <p class="text-xs text-slate-400">Giao task phân tích video/stream & tra cứu tiến độ</p>
-          </div>
+      <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-800">Trợ lý Điều phối Tác vụ</h2>
+          <p class="text-xs text-slate-500">Giao lệnh phân tích video/stream và tra cứu tiến độ</p>
         </div>
-        <button onclick="clearChat()" class="text-xs text-slate-400 hover:text-slate-200 transition px-2 py-1 rounded hover:bg-slate-800">
-          <i class="fa-solid fa-rotate-right mr-1"></i> Làm mới
+        <button onclick="clearChat()" class="text-xs text-slate-600 hover:text-slate-900 transition px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50">
+          Làm mới
         </button>
       </div>
 
       <!-- Quick Action Prompt Chips -->
-      <div class="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800/60 flex items-center gap-2 overflow-x-auto no-scrollbar text-xs">
-        <span class="text-slate-500 flex items-center gap-1 shrink-0"><i class="fa-solid fa-bolt"></i> Gợi ý:</span>
-        <button onclick="sendQuickPrompt('Hãy phân tích video data_test/flood_g2_0190_3e225b42.mp4 xem có ngập không')" class="shrink-0 px-3 py-1 rounded-full bg-slate-800 hover:bg-emerald-600/30 hover:border-emerald-500/50 border border-slate-700 text-slate-300 transition">
-          🌊 Phân tích CAM_FLOOD_G2 (Ngập)
+      <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto text-xs">
+        <span class="text-slate-500 font-medium shrink-0">Lệnh nhanh:</span>
+        <button onclick="sendQuickPrompt('Hãy phân tích video data_test/flood_g2_0190_3e225b42.mp4 xem có ngập không')" class="shrink-0 px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium transition">
+          Phân tích CAM_FLOOD_G2 (Ngập)
         </button>
-        <button onclick="sendQuickPrompt('Hãy kiểm tra camera CAM_FLOOD_G0 xem lưu lượng xe và vạch đếm')" class="shrink-0 px-3 py-1 rounded-full bg-slate-800 hover:bg-blue-600/30 hover:border-blue-500/50 border border-slate-700 text-slate-300 transition">
-          🚗 Phân tích CAM_FLOOD_G0 (Đếm xe)
+        <button onclick="sendQuickPrompt('Hãy kiểm tra camera CAM_FLOOD_G0 xem lưu lượng xe và vạch đếm')" class="shrink-0 px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium transition">
+          Phân tích CAM_FLOOD_G0 (Đếm xe)
         </button>
-        <button onclick="sendQuickPrompt('Task làm tới đâu rồi bot, tình hình ngập ra sao?')" class="shrink-0 px-3 py-1 rounded-full bg-slate-800 hover:bg-purple-600/30 hover:border-purple-500/50 border border-slate-700 text-slate-300 transition">
-          ⏳ Task làm tới đâu rồi?
+        <button onclick="sendQuickPrompt('Task làm tới đâu rồi bot, tình hình ngập ra sao?')" class="shrink-0 px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium transition">
+          Hỏi tiến độ task
         </button>
       </div>
 
       <!-- Chat Messages Container -->
-      <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50/30">
         <!-- Welcome Message -->
         <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-            <i class="fa-solid fa-shield-cat text-sm"></i>
+          <div class="w-7 h-7 rounded bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 border border-blue-200">
+            SR
           </div>
-          <div class="glass-card p-3.5 rounded-2xl rounded-tl-none max-w-[85%] text-sm text-slate-200 leading-relaxed shadow-sm">
-            <p class="font-medium text-emerald-400 mb-1">Xin chào! Tôi là Trợ lý Điều phối SafeRoute AI.</p>
-            <p>Tôi có thể giúp bạn:</p>
-            <ul class="list-disc list-inside mt-1 space-y-0.5 text-xs text-slate-300">
-              <li>Giao task phân tích video/livestream kiểm tra ngập và đếm xe.</li>
-              <li>Theo dõi tiến độ xử lý và báo cáo chiều sâu nước (cm) theo thời gian thực.</li>
-              <li>Bấm vào các nút gợi ý nhanh ở trên hoặc gõ lệnh để bắt đầu!</li>
+          <div class="card-base p-4 rounded-xl rounded-tl-none max-w-[85%] text-sm text-slate-800 leading-relaxed">
+            <p class="font-semibold text-slate-900 mb-1">Hệ thống điều phối SafeRoute sẵn sàng.</p>
+            <p class="text-xs text-slate-600 mb-2">Bạn có thể giao lệnh phân tích dữ liệu camera hoặc kiểm tra báo cáo bằng ngôn ngữ tự nhiên:</p>
+            <ul class="list-disc list-inside space-y-1 text-xs text-slate-600">
+              <li>Giao task: <code>Phân tích video flood_g2...</code> hoặc link luồng RTSP</li>
+              <li>Truy vấn: <code>Task vừa giao làm tới đâu rồi?</code></li>
             </ul>
           </div>
         </div>
       </div>
 
       <!-- Chat Input Bar -->
-      <div class="p-3 border-t border-slate-800 bg-slate-900/80">
+      <div class="p-3 border-t border-slate-200 bg-white">
         <form id="chatForm" onsubmit="handleChatSubmit(event)" class="flex items-center gap-2">
           <input 
             type="text" 
             id="chatInput" 
-            placeholder="Nhập yêu cầu: 'Phân tích video flood_g2...' hoặc 'Task làm tới đâu rồi?'" 
-            class="flex-1 bg-slate-800/90 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+            placeholder="Nhập yêu cầu: 'Phân tích video...' hoặc 'Task làm tới đâu rồi?'" 
+            class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition"
           />
           <button 
             type="submit" 
             id="sendBtn"
-            class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-medium transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
+            class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition shadow-sm disabled:opacity-50"
           >
-            <span>Gửi</span>
-            <i class="fa-solid fa-paper-plane text-xs"></i>
+            Gửi lệnh
           </button>
         </form>
       </div>
@@ -149,46 +119,45 @@
     </section>
 
     <!-- RIGHT: Live Task Monitor & Real-Time Telemetry Dashboard -->
-    <section class="hidden lg:flex w-1/2 flex-col bg-slate-900/20 overflow-y-auto p-6 space-y-6">
+    <section class="hidden lg:flex w-1/2 flex-col bg-slate-50 overflow-y-auto p-6 space-y-5">
       
       <!-- Section Title -->
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-200">
         <div>
-          <h2 class="text-base font-bold text-white flex items-center gap-2">
-            <i class="fa-solid fa-chart-line text-emerald-400"></i>
-            Live Task Telemetry & Metrics
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-800">
+            Bảng Điều khiển & Giám sát Tiến độ
           </h2>
-          <p class="text-xs text-slate-400">Giám sát chi tiết tác vụ đang chạy ngầm trên Camera AI</p>
+          <p class="text-xs text-slate-500">Thông số kỹ thuật thời gian thực từ mô hình phân tích</p>
         </div>
-        <span id="liveStatusBadge" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
-          Chưa có task chạy
+        <span id="liveStatusBadge" class="px-2.5 py-1 rounded text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+          Chờ tác vụ
         </span>
       </div>
 
       <!-- Active Task Card -->
-      <div class="glass-card rounded-2xl p-5 space-y-4">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-700/60">
+      <div class="card-base rounded-xl p-5 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 text-xs">
           <div>
-            <span class="text-xs text-slate-400">Tác vụ hiện tại</span>
-            <p id="taskTitle" class="text-sm font-bold text-white">Chưa kích hoạt</p>
+            <span class="text-slate-500 font-medium">Mã Tác vụ</span>
+            <p id="taskTitle" class="text-sm font-bold text-slate-900">--</p>
           </div>
           <div class="text-right">
-            <span class="text-xs text-slate-400">Camera ID</span>
-            <p id="taskCamera" class="text-sm font-semibold text-emerald-400">--</p>
+            <span class="text-slate-500 font-medium">Camera ID</span>
+            <p id="taskCamera" class="text-sm font-bold text-blue-600">--</p>
           </div>
         </div>
 
         <!-- Progress Bar -->
         <div class="space-y-1.5">
           <div class="flex justify-between text-xs font-medium">
-            <span class="text-slate-300">Tiến độ phân tích:</span>
-            <span id="progressText" class="text-emerald-400 font-bold">0% (0/0 frames)</span>
+            <span class="text-slate-600">Tiến độ xử lý frame:</span>
+            <span id="progressText" class="text-blue-600 font-bold">0% (0/0 frames)</span>
           </div>
-          <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700/60">
-            <div id="progressBar" class="bg-gradient-to-r from-emerald-500 to-cyan-500 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+          <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+            <div id="progressBar" class="bg-blue-600 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
           </div>
-          <div class="flex justify-between text-[11px] text-slate-400 pt-0.5">
-            <span id="elapsedTime">Thời gian: 0s</span>
+          <div class="flex justify-between text-[11px] text-slate-500 pt-0.5">
+            <span id="elapsedTime">Thời gian thực thi: 0s</span>
             <span id="fpsDisplay">Tốc độ: 0.0 FPS</span>
           </div>
         </div>
@@ -198,68 +167,64 @@
       <div class="grid grid-cols-2 gap-4">
         
         <!-- Flood Gauge Card -->
-        <div class="glass-card rounded-2xl p-4 space-y-2 border-l-4 border-cyan-500">
+        <div class="card-base rounded-xl p-4 space-y-2 border-t-2 border-t-sky-500">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <i class="fa-solid fa-water text-cyan-400"></i>
+            <span class="text-xs font-semibold text-slate-600">
               Mức độ Ngập Nước
             </span>
-            <span id="floodStatusTag" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">--</span>
+            <span id="floodStatusTag" class="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium border border-slate-200">--</span>
           </div>
-          <div class="flex items-baseline gap-2 pt-1">
-            <span id="floodDepth" class="text-3xl font-extrabold text-white">0.0</span>
-            <span class="text-xs text-slate-400 font-medium">cm</span>
+          <div class="flex items-baseline gap-1.5 pt-1">
+            <span id="floodDepth" class="text-3xl font-bold text-slate-900">0.0</span>
+            <span class="text-xs text-slate-500 font-medium">cm</span>
           </div>
-          <div class="text-xs text-slate-400 flex justify-between pt-1 border-t border-slate-800">
+          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-slate-100">
             <span>Tỷ lệ mặt nước:</span>
-            <span id="waterRatio" class="text-cyan-400 font-semibold">0.0%</span>
+            <span id="waterRatio" class="text-slate-800 font-semibold">0.0%</span>
           </div>
         </div>
 
         <!-- Traffic Counter Card -->
-        <div class="glass-card rounded-2xl p-4 space-y-2 border-l-4 border-emerald-500">
+        <div class="card-base rounded-xl p-4 space-y-2 border-t-2 border-t-blue-500">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <i class="fa-solid fa-car text-emerald-400"></i>
+            <span class="text-xs font-semibold text-slate-600">
               Lưu lượng Giao thông
             </span>
-            <span id="jamTag" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">Bình thường</span>
+            <span id="jamTag" class="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium border border-slate-200">Bình thường</span>
           </div>
-          <div class="flex items-baseline gap-2 pt-1">
-            <span id="totalVehicles" class="text-3xl font-extrabold text-white">0</span>
-            <span class="text-xs text-slate-400 font-medium">xe đã qua</span>
+          <div class="flex items-baseline gap-1.5 pt-1">
+            <span id="totalVehicles" class="text-3xl font-bold text-slate-900">0</span>
+            <span class="text-xs text-slate-500 font-medium">xe đã qua</span>
           </div>
-          <div class="text-xs text-slate-400 flex justify-between pt-1 border-t border-slate-800">
-            <span>Số nhánh tripwire:</span>
-            <span id="branchSummary" class="text-emerald-400 font-semibold">0 nhánh</span>
+          <div class="text-xs text-slate-500 flex justify-between pt-2 border-t border-slate-100">
+            <span>Nhánh vạch kẻ:</span>
+            <span id="branchSummary" class="text-slate-800 font-semibold">0 nhánh</span>
           </div>
         </div>
 
       </div>
 
       <!-- Tripwires Detail & Output Video Preview -->
-      <div class="glass-card rounded-2xl p-4 space-y-3">
-        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-          <span>Chi tiết đếm xe theo nhánh & Video kết quả</span>
-          <i class="fa-solid fa-video text-slate-500"></i>
+      <div class="card-base rounded-xl p-5 space-y-3">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-600">
+          Chi tiết đếm xe theo nhánh & Video kết quả
         </h3>
         
         <div id="branchList" class="flex flex-wrap gap-2 text-xs">
-          <span class="text-slate-500 italic">Chưa có dữ liệu nhánh</span>
+          <span class="text-slate-400 italic">Chưa có dữ liệu nhánh</span>
         </div>
 
         <!-- Video Player Container -->
-        <div id="videoContainer" class="hidden pt-3 border-t border-slate-800 space-y-2">
+        <div id="videoContainer" class="hidden pt-4 border-t border-slate-200 space-y-2">
           <div class="flex items-center justify-between">
-            <p class="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
-              <i class="fa-solid fa-circle-check"></i>
-              Video phân tích đã hoàn tất:
+            <p class="text-xs text-slate-800 font-semibold">
+              Video phân tích hoàn tất:
             </p>
-            <a id="downloadVideoBtn" href="#" download class="text-xs px-2.5 py-1 rounded-lg bg-emerald-600/30 text-emerald-400 hover:bg-emerald-600/50 border border-emerald-500/40 flex items-center gap-1 transition">
-              <i class="fa-solid fa-download"></i> Tải MP4
+            <a id="downloadVideoBtn" href="#" download class="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium border border-slate-300 transition">
+              Tải file MP4
             </a>
           </div>
-          <div class="rounded-xl overflow-hidden bg-black/60 border border-slate-700 aspect-video flex items-center justify-center">
+          <div class="rounded-lg overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
             <video id="resultVideo" controls playsinline preload="auto" class="w-full h-full object-contain"></video>
           </div>
         </div>
@@ -284,12 +249,12 @@
       const container = document.getElementById('chatMessages');
       container.innerHTML = `
         <div class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-            <i class="fa-solid fa-shield-cat text-sm"></i>
+          <div class="w-7 h-7 rounded bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 border border-blue-200">
+            SR
           </div>
-          <div class="glass-card p-3.5 rounded-2xl rounded-tl-none max-w-[85%] text-sm text-slate-200 leading-relaxed shadow-sm">
-            <p class="font-medium text-emerald-400 mb-1">Cuộc hội thoại đã được làm mới.</p>
-            <p class="text-xs text-slate-300">Bạn có thể giao task phân tích hoặc đặt câu hỏi bất cứ lúc nào!</p>
+          <div class="card-base p-4 rounded-xl rounded-tl-none max-w-[85%] text-sm text-slate-800 leading-relaxed">
+            <p class="font-semibold text-slate-900 mb-1">Cuộc hội thoại đã được làm mới.</p>
+            <p class="text-xs text-slate-600">Bạn có thể giao lệnh phân tích hoặc đặt câu hỏi bất cứ lúc nào.</p>
           </div>
         </div>
       `;
@@ -304,18 +269,18 @@
       wrapper.className = `flex items-start gap-3 ${isUser ? 'flex-row-reverse' : ''}`;
       
       const avatar = document.createElement('div');
-      avatar.className = `w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+      avatar.className = `w-7 h-7 rounded flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold ${
         isUser 
-          ? 'bg-blue-600 text-white' 
-          : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
+          ? 'bg-slate-800 text-white' 
+          : 'bg-blue-100 text-blue-700 border border-blue-200'
       }`;
-      avatar.innerHTML = `<i class="fa-solid ${isUser ? 'fa-user text-xs' : 'fa-robot text-sm'}"></i>`;
+      avatar.textContent = isUser ? 'BẠN' : 'SR';
       
       const bubble = document.createElement('div');
-      bubble.className = `p-3.5 rounded-2xl text-sm leading-relaxed max-w-[85%] ${
+      bubble.className = `p-3.5 rounded-xl text-sm leading-relaxed max-w-[85%] ${
         isUser 
           ? 'bg-blue-600 text-white rounded-tr-none' 
-          : 'glass-card text-slate-200 rounded-tl-none prose prose-invert prose-sm'
+          : 'card-base text-slate-800 rounded-tl-none prose prose-slate prose-sm'
       }`;
       
       if (isUser) {
@@ -338,11 +303,11 @@
       el.id = id;
       el.className = 'flex items-start gap-3';
       el.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-          <i class="fa-solid fa-spinner fa-spin text-xs"></i>
+        <div class="w-7 h-7 rounded bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-200">
+          SR
         </div>
-        <div class="glass-card px-4 py-2.5 rounded-2xl rounded-tl-none text-xs text-slate-400 flex items-center gap-1.5">
-          <span>Groq LPU đang suy nghĩ & phân tích...</span>
+        <div class="card-base px-3.5 py-2 rounded-xl rounded-tl-none text-xs text-slate-500">
+          Đang xử lý yêu cầu...
         </div>
       `;
       container.appendChild(el);
@@ -389,7 +354,7 @@
         }
       } catch (err) {
         removeTyping();
-        appendMessage('bot', `⚠️ Lỗi kết nối máy chủ: ${err.message}`);
+        appendMessage('bot', `Lỗi kết nối máy chủ: ${err.message}`);
       } finally {
         sendBtn.disabled = false;
         input.focus();
@@ -418,14 +383,14 @@
         // Status Badge
         const statusBadge = document.getElementById('liveStatusBadge');
         if (task.status === 'RUNNING') {
-          statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1.5';
-          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span> ĐANG XỬ LÝ (${task.progress_pct}%)`;
+          statusBadge.className = 'px-2.5 py-1 rounded text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200';
+          statusBadge.textContent = `ĐANG XỬ LÝ (${task.progress_pct}%)`;
         } else if (task.status === 'COMPLETED') {
-          statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5';
-          statusBadge.innerHTML = `<i class="fa-solid fa-check"></i> ĐÃ HOÀN TẤT`;
+          statusBadge.className = 'px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+          statusBadge.textContent = 'HOÀN TẤT';
           if (pollInterval) clearInterval(pollInterval);
         } else if (task.status === 'FAILED') {
-          statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30';
+          statusBadge.className = 'px-2.5 py-1 rounded text-xs font-semibold bg-red-50 text-red-700 border border-red-200';
           statusBadge.textContent = 'GẶP LỖI';
           if (pollInterval) clearInterval(pollInterval);
         }
@@ -434,7 +399,7 @@
         const pct = task.progress_pct || 0;
         document.getElementById('progressBar').style.width = `${pct}%`;
         document.getElementById('progressText').textContent = `${pct}% (${task.frames_processed}/${task.total_frames || '...'} frames)`;
-        document.getElementById('elapsedTime').textContent = `Thời gian: ${task.duration_elapsed_sec || 0}s`;
+        document.getElementById('elapsedTime').textContent = `Thời gian thực thi: ${task.duration_elapsed_sec || 0}s`;
         document.getElementById('fpsDisplay').textContent = `Tốc độ: ${task.fps_processing || 0} FPS`;
 
         // Metrics
@@ -445,11 +410,11 @@
         const st = m.flood_status || 'Chưa xác định';
         floodTag.textContent = st;
         if (st.includes('nhiều') || st === 'flooded') {
-          floodTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 font-semibold';
+          floodTag.className = 'text-[11px] px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-semibold';
         } else if (st.includes('được') || st.includes('Passable')) {
-          floodTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold';
+          floodTag.className = 'text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold';
         } else {
-          floodTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold';
+          floodTag.className = 'text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold';
         }
 
         document.getElementById('floodDepth').textContent = (m.estimated_depth_cm || 0).toFixed(1);
@@ -459,10 +424,10 @@
         document.getElementById('totalVehicles').textContent = m.total_vehicles || 0;
         const jamTag = document.getElementById('jamTag');
         if (m.is_jammed) {
-          jamTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-semibold';
+          jamTag.className = 'text-[11px] px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-semibold';
           jamTag.textContent = 'Ùn tắc nghiêm trọng';
         } else {
-          jamTag.className = 'text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold';
+          jamTag.className = 'text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold';
           jamTag.textContent = 'Thông thoáng';
         }
 
@@ -474,8 +439,7 @@
 
         if (bKeys.length > 0) {
           branchList.innerHTML = bKeys.map(k => `
-            <span class="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700/80 text-slate-300 flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span class="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 text-slate-700 font-medium">
               <strong>${k}:</strong> ${bCounts[k]} xe
             </span>
           `).join('');
