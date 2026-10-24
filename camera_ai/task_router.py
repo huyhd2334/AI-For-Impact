@@ -51,13 +51,16 @@ def chat_with_agent(req: ChatRequest):
             instruction=instruction
         )
 
+        from pathlib import Path
+        v_name = Path(task_info['video_source']).name
+
         reply_text = (
-            f"✅ Tôi đã tiếp nhận yêu cầu và khởi chạy tác vụ ngầm thành công!\n\n"
-            f"📋 **Mã Task:** `{task_info['task_id']}`\n"
-            f"📹 **Nguồn video:** `{task_info['video_source']}`\n"
-            f"🎥 **Camera ID:** `{task_info['camera_id']}`\n"
-            f"⚙️ **Trạng thái:** Đang xử lý các khung hình đầu tiên...\n\n"
-            f"👉 Bạn có thể hỏi tôi bất cứ lúc nào: *'Task {task_info['task_id']} làm tới đâu rồi?'* để cập nhật tiến độ!"
+            f"**Đã khởi chạy tác vụ phân tích:**\n\n"
+            f"- **Mã tác vụ:** `{task_info['task_id']}`\n"
+            f"- **Tệp nguồn:** `{v_name}`\n"
+            f"- **Camera ID:** `{task_info['camera_id']}`\n"
+            f"- **Trạng thái:** Đang phân tích khung hình ngầm...\n\n"
+            f"*Bạn có thể theo dõi tiến độ trực tiếp trên bảng điều khiển bên phải hoặc gửi tin nhắn 'Tiến độ task' bất cứ lúc nào.*"
         )
 
         return {
