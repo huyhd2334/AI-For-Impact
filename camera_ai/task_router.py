@@ -37,7 +37,22 @@ def chat_with_agent(req: ChatRequest):
     analysis = llm_agent.analyze_user_intent(req.message, recent_tasks)
     intent = analysis.get("intent", "GENERAL_CHAT")
 
-    if intent == "DISPATCH_TASK":
+    if intent == "STOP_TASK" or any(w in req.message.lower() for w in ["dừng task", "dung task", "hủy task", "huy task", "stop task", "dừng lại", "dừng video"]):
+        res = task_manager.stop_task(analysis.get("target_task_id"))
+        if res.get("success"):
+            return {
+                "intent": "STOP_TASK",
+                "reply": f"**Đã dừng tác vụ thành công:**\n- **Mã tác vụ:** `{res['task_id']}`\n- **Trạng thái:** Đã ngừng xử lý video.",
+                "task": task_manager.get_task(res['task_id'])
+            }
+        else:
+            return {
+                "intent": "STOP_TASK",
+                "reply": "Hiện không có tác vụ phân tích nào đang chạy để dừng.",
+                "task": None
+            }
+
+    elif intent == "DISPATCH_TASK":
         video_src = analysis.get("video_source") or "data_test/flood_g2_0190_3e225b42.mp4"
         cam_id = analysis.get("camera_id") or "CAM_FLOOD_G2"
         action = analysis.get("action") or "both"
@@ -118,6 +133,22 @@ def dispatch_task_direct(req: DispatchTaskRequest):
         sample_interval=req.sample_interval or 2
     )
     return task
+
+
+@task_router.post("/tasks/{task_id}/stop", summary="Dừng một Task đang chạy ngầm")
+def stop_task_by_id(task_id: str):
+    res = task_manager.stop_task(task_id)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@task_router.post("/tasks/stop", summary="Dừng Task đang chạy gần nhất")
+def stop_latest_task():
+    res = task_manager.stop_task()
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
 
 
 @task_router.get("/tasks/{task_id}", summary="Tra cứu trạng thái và tiến độ chi tiết của một Task")

@@ -55,7 +55,7 @@ class VideoTaskManager:
 
         task_record = {
             "task_id": task_id,
-            "status": "PENDING",  # PENDING -> RUNNING -> COMPLETED | FAILED
+            "status": "PENDING",  # PENDING -> RUNNING -> COMPLETED | FAILED | STOPPED
             "instruction": instruction,
             "video_source": str(video_source),
             "camera_id": camera_id,
@@ -64,6 +64,7 @@ class VideoTaskManager:
             "frames_processed": 0,
             "total_frames": 0,
             "fps_processing": 0.0,
+            "stop_requested": False,
             "start_time": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
             "duration_elapsed_sec": 0.0,
@@ -152,6 +153,12 @@ class VideoTaskManager:
                 processed_count += 1
                 elapsed = time.time() - t_start
 
+                # Kiểm tra cờ yêu cầu dừng từ người dùng
+                with self._lock:
+                    if self._tasks.get(task_id, {}).get("stop_requested"):
+                        print(f"[TaskManager] Tác vụ {task_id} đã nhận lệnh dừng từ người dùng.")
+                        break
+
                 # Dừng nếu vượt quá thời lượng cho phép đối với livestream
                 if elapsed > max_duration_sec:
                     break
@@ -222,9 +229,11 @@ class VideoTaskManager:
             self._convert_to_web_h264(out_path)
 
             with self._lock:
-                if task_id in self._tasks and self._tasks[task_id]["status"] != "FAILED":
-                    self._tasks[task_id]["status"] = "COMPLETED"
-                    self._tasks[task_id]["progress_pct"] = 100.0
+                if task_id in self._tasks:
+                    curr_st = self._tasks[task_id]["status"]
+                    if curr_st not in ["FAILED", "STOPPED"]:
+                        self._tasks[task_id]["status"] = "COMPLETED"
+                        self._tasks[task_id]["progress_pct"] = 100.0
                     self._tasks[task_id]["duration_elapsed_sec"] = round(elapsed_final, 1)
                     self._tasks[task_id]["updated_at"] = datetime.now().isoformat()
                     self._tasks[task_id]["current_metrics"] = {
@@ -235,6 +244,30 @@ class VideoTaskManager:
                         "branch_counts": tripwire_counts,
                         "is_jammed": getattr(obs_event, 'congestion_level', 'LOW') in ['HIGH', 'JAMMED'] if obs_event else False
                     }
+
+    def stop_task(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """Dừng tác vụ đang chạy theo task_id hoặc dừng tác vụ đang chạy gần nhất"""
+        with self._lock:
+            target = None
+            if task_id and task_id in self._tasks:
+                target = self._tasks[task_id]
+            else:
+                for t in reversed(list(self._tasks.values())):
+                    if t.get("status") in ["RUNNING", "PENDING"]:
+                        target = t
+                        break
+
+            if not target:
+                return {"success": False, "message": "Hiện không có tác vụ nào đang chạy để dừng."}
+
+            target["stop_requested"] = True
+            target["status"] = "STOPPED"
+            target["updated_at"] = datetime.now().isoformat()
+            return {
+                "success": True,
+                "task_id": target["task_id"],
+                "message": f"Đã dừng tác vụ {target['task_id']} thành công."
+            }
 
     @staticmethod
     def _convert_to_web_h264(video_path: str):
